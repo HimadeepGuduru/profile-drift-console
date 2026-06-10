@@ -373,23 +373,43 @@
 <div class="overlay" id="overlay">
   <div class="modal">
     <h3>Connect to Salesforce <span id="connEnvLbl" style="color:var(--accent)"></span></h3>
-    <p class="msub">Reads the profile live via the REST API using an access token. Covers system, object, field-level, Apex, Visualforce, custom-permission and tab access.</p>
+    <p class="msub">Reads the profile live via the REST API. Covers system, object, field-level, Apex, Visualforce, custom-permission and tab access.</p>
+
+    <div class="field"><label>Profile API name</label><input id="connProfile" placeholder="CAIS_Agency_Admin" autocomplete="off"></div>
+
+    <div class="clihelp" style="border-color:rgba(91,140,255,.4)">
+      <div class="clihelp-h" style="color:var(--accent)">Log in with Salesforce (recommended)</div>
+      <div class="field" style="margin-bottom:10px"><label>Environment</label>
+        <select id="connEnvType" style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none">
+          <option value="prod">Production / Developer (login.salesforce.com)</option>
+          <option value="sandbox">Sandbox (test.salesforce.com)</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="password" placeholder="3MVG9…" autocomplete="off"></div>
+      <button class="btn primary" id="connOauth" style="width:100%">Log in with Salesforce →</button>
+      <div class="clihelp-n">Consumer Key: Setup → Connected Apps → your app → Manage Consumer Details. Saved in this browser only, never sent to the repo.</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em">
+      <span style="flex:1;height:1px;background:var(--line-soft)"></span>or paste a CLI token<span style="flex:1;height:1px;background:var(--line-soft)"></span>
+    </div>
+
     <div class="clihelp">
-      <div class="clihelp-h">Get a token from the Salesforce CLI</div>
+      <div class="clihelp-h">Token from the Salesforce CLI</div>
       <pre>sf org login web -o MyOrg
 sf org display -o MyOrg --json</pre>
-      <div class="clihelp-n">Copy <code>instanceUrl</code> and <code>accessToken</code> from the JSON output. (Token expires on session timeout — re-run when it does.)</div>
+      <div class="clihelp-n">Copy <code>instanceUrl</code> and <code>accessToken</code> from the JSON output.</div>
     </div>
     <div class="field"><label>Instance URL</label><input id="connUrl" placeholder="https://mydomain.my.salesforce.com" autocomplete="off"></div>
     <div class="field"><label>Access token</label><input id="connToken" type="password" placeholder="00D...!AQ..." autocomplete="off"></div>
-    <div class="field"><label>Profile API name</label><input id="connProfile" placeholder="CAIS_Agency_Admin" autocomplete="off"></div>
+
     <div class="progress" id="connProgress"></div>
     <div class="err" id="connErr"></div>
     <div class="modal-foot">
       <button class="btn ghost" id="connCancel">Cancel</button>
-      <button class="btn primary" id="connGo">Fetch profile</button>
+      <button class="btn" id="connGo">Fetch with token</button>
     </div>
-    <p class="msub" style="margin:12px 0 0">Live mode needs your site's origin in the org's CORS allowlist (Setup → CORS). App, record-type and layout visibility aren't exposed over REST — use the XML paste path for a complete profile.</p>
+    <p class="msub" style="margin:12px 0 0">Both paths need this site's origin in the org's CORS allowlist (Setup → CORS) to read the profile. App, record-type and layout visibility aren't exposed over REST — use the XML paste path for a complete profile.</p>
   </div>
 </div>
 
@@ -771,8 +791,69 @@ function wireCodeButtons(){
 
 /* ---------- LIVE CONNECT (REST) ---------- */
 let connEnv = null;
-function openConnect(env){ connEnv=env; $('#connEnvLbl').textContent='· '+ENV_LABEL[env]; $('#connErr').textContent=''; $('#connProgress').textContent=''; $('#overlay').classList.add('show'); $('#connUrl').focus(); }
+const LS_KEY='pdc_consumer_key';
+function getKey(){ try{ return localStorage.getItem(LS_KEY)||''; }catch(e){ return ''; } }
+function saveKey(k){ try{ localStorage.setItem(LS_KEY,k); }catch(e){} }
+function openConnect(env){
+  connEnv=env;
+  $('#connEnvLbl').textContent='· '+ENV_LABEL[env];
+  $('#connErr').textContent=''; $('#connProgress').textContent='';
+  $('#connKey').value=getKey();
+  $('#overlay').classList.add('show');
+  $('#connProfile').focus();
+}
 function closeConnect(){ $('#overlay').classList.remove('show'); }
+
+/* OAuth (User-Agent / implicit) — redirect to Salesforce, return with a token in the URL hash */
+function oauthLogin(){
+  const prof=$('#connProfile').value.trim();
+  const key=$('#connKey').value.trim();
+  const sandbox=$('#connEnvType').value==='sandbox';
+  const err=$('#connErr'); err.textContent='';
+  if(!prof){ err.textContent='Enter the Profile API name first.'; $('#connProfile').focus(); return; }
+  if(!key){ err.textContent='Paste your Connected App Consumer Key.'; $('#connKey').focus(); return; }
+  saveKey(key);
+  try{ sessionStorage.setItem('pdc_pending', JSON.stringify({env:connEnv, prof})); }catch(e){}
+  const loginUrl = sandbox ? 'https://test.salesforce.com' : 'https://login.salesforce.com';
+  const redirect = location.origin + location.pathname;
+  const url = loginUrl + '/services/oauth2/authorize'
+    + '?response_type=token'
+    + '&client_id=' + encodeURIComponent(key)
+    + '&redirect_uri=' + encodeURIComponent(redirect)
+    + '&scope=' + encodeURIComponent('full')
+    + '&state=' + encodeURIComponent(connEnv)
+    + '&prompt=login';
+  location.assign(url);
+}
+async function handleOAuthReturn(){
+  const h=location.hash||'';
+  if(h.indexOf('access_token=')===-1 && h.indexOf('error=')===-1) return;
+  const p=new URLSearchParams(h.replace(/^#/,''));
+  history.replaceState(null,'',location.origin+location.pathname); // strip token from the address bar
+  if(p.get('error')){ toast('Login failed: '+(p.get('error_description')||p.get('error'))); return; }
+  const token=p.get('access_token'), inst=p.get('instance_url'), env=p.get('state');
+  if(!token||!inst||!env) return;
+  let prof='';
+  try{ const pend=JSON.parse(sessionStorage.getItem('pdc_pending')||'{}'); prof=pend.prof||''; }catch(e){}
+  sessionStorage.removeItem('pdc_pending');
+  if(!prof){ openConnect(env); $('#connUrl').value=inst; $('#connToken').value=token; $('#connErr').textContent='Logged in — enter the profile name and click Fetch with token.'; return; }
+  toast('Logged in to '+ENV_LABEL[env]+' — reading '+prof+'…');
+  try{
+    const {cats,name}=await fetchProfile(inst,token,prof,()=>{});
+    const total=CATS.reduce((s,c)=>s+cats[c.key].size,0);
+    if(!total) throw new Error('Connected, but no permissions returned for "'+prof+'".');
+    $('#ta-'+env).value = serializeProfile({license:'',customRaw:''}, cats);
+    loadEnv(env);
+    if(MODEL[env]) MODEL[env].name=name;
+    $('#nm-'+env).textContent=name;
+    $('#stat-'+env).textContent='✓ live · '+total+' perms'; $('#stat-'+env).className='stat good';
+    toast('Connected to '+ENV_LABEL[env]+' · '+name+' — connect the others, then Compare.');
+  }catch(e){
+    toast(/Failed to fetch|NetworkError|TypeError/.test(String(e))
+      ? 'Logged in, but the profile read was blocked — add this origin to the org\u2019s CORS allowlist (Setup \u2192 CORS).'
+      : String(e.message||e));
+  }
+}
 const sescQ = s=>String(s).replace(/'/g,"\\'");
 const baseUrl = u=>u.replace(/\/+$/,'');
 function chunk(a,n){ const o=[]; for(let i=0;i<a.length;i+=n) o.push(a.slice(i,i+n)); return o; }
@@ -901,6 +982,8 @@ $$('input[type=file]').forEach(inp=>inp.onchange=ev=>{
 $$('[data-connect]').forEach(b=>b.onclick=()=>openConnect(b.dataset.connect));
 $('#connCancel').onclick=closeConnect;
 $('#connGo').onclick=doConnect;
+$('#connOauth').onclick=oauthLogin;
+handleOAuthReturn();
 $('#overlay').onclick=e=>{ if(e.target.id==='overlay') closeConnect(); };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeConnect(); });
 $('#compareBtn').onclick=run;
