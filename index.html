@@ -385,7 +385,7 @@
           <option value="sandbox">Sandbox (test.salesforce.com)</option>
         </select>
       </div>
-      <div class="field" id="connKeyRow" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="password" placeholder="3MVG9…" autocomplete="off"></div>
+      <div class="field" id="connKeyRow" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="3MVG9…"></div>
       <button class="btn primary" id="connOauth" style="width:100%">Log in with Salesforce →</button>
       <div class="clihelp-n">If set in the code, this is pre-filled for everyone — just click Log in. Otherwise paste it once (Setup → Connected Apps → your app → Manage Consumer Details); it's saved in your browser.</div>
     </div>
@@ -795,8 +795,9 @@ let connEnv = null;
 // A Consumer Key (Client ID) is a public OAuth identifier — safe to commit. (The Consumer SECRET is not; don't put that here.)
 const DEFAULT_CONSUMER_KEY = '3MVG9GCMQoQ6rpzTViwky6e4Z5H5nh_DA.l0ehIFzS0Ocakc_DGmq9dOc35ob2ADS0FcSxpLDwobPftNSB_Yz'; // Connected App Consumer Key — public OAuth client_id, safe to commit. (Do NOT put the Consumer Secret here.)
 const LS_KEY='pdc_consumer_key';
-function getKey(){ try{ return localStorage.getItem(LS_KEY) || DEFAULT_CONSUMER_KEY || ''; }catch(e){ return DEFAULT_CONSUMER_KEY || ''; } }
+function getKey(){ try{ return DEFAULT_CONSUMER_KEY || localStorage.getItem(LS_KEY) || ''; }catch(e){ return DEFAULT_CONSUMER_KEY || ''; } }
 function saveKey(k){ try{ localStorage.setItem(LS_KEY,k); }catch(e){} }
+if(DEFAULT_CONSUMER_KEY){ try{ localStorage.removeItem(LS_KEY); }catch(e){} } // baked-in key is authoritative — drop any stale/autofilled override
 function openConnect(env){
   connEnv=env;
   $('#connEnvLbl').textContent='· '+ENV_LABEL[env];
@@ -812,12 +813,12 @@ function closeConnect(){ $('#overlay').classList.remove('show'); }
 let pendingConnect = null;
 function oauthLogin(){
   const prof=$('#connProfile').value.trim();
-  const key=$('#connKey').value.trim();
+  const key = DEFAULT_CONSUMER_KEY || $('#connKey').value.trim();
   const sandbox=$('#connEnvType').value==='sandbox';
   const err=$('#connErr'); err.textContent='';
   if(!prof){ err.textContent='Enter the Profile API name first.'; $('#connProfile').focus(); return; }
   if(!key){ err.textContent='Paste your Connected App Consumer Key.'; $('#connKey').focus(); return; }
-  saveKey(key);
+  if(!DEFAULT_CONSUMER_KEY) saveKey(key);
   pendingConnect = {env:connEnv, prof};
   const loginUrl = sandbox ? 'https://test.salesforce.com' : 'https://login.salesforce.com';
   const redirect = location.origin + location.pathname;
