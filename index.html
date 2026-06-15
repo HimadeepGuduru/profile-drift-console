@@ -808,7 +808,8 @@ function openConnect(env){
 }
 function closeConnect(){ $('#overlay').classList.remove('show'); }
 
-/* OAuth (User-Agent / implicit) — redirect to Salesforce, return with a token in the URL hash */
+/* OAuth (User-Agent / implicit) via POPUP — main page (and other loaded envs) stay intact */
+let pendingConnect = null;
 function oauthLogin(){
   const prof=$('#connProfile').value.trim();
   const key=$('#connKey').value.trim();
@@ -817,7 +818,7 @@ function oauthLogin(){
   if(!prof){ err.textContent='Enter the Profile API name first.'; $('#connProfile').focus(); return; }
   if(!key){ err.textContent='Paste your Connected App Consumer Key.'; $('#connKey').focus(); return; }
   saveKey(key);
-  try{ sessionStorage.setItem('pdc_pending', JSON.stringify({env:connEnv, prof})); }catch(e){}
+  pendingConnect = {env:connEnv, prof};
   const loginUrl = sandbox ? 'https://test.salesforce.com' : 'https://login.salesforce.com';
   const redirect = location.origin + location.pathname;
   const url = loginUrl + '/services/oauth2/authorize'
@@ -825,37 +826,60 @@ function oauthLogin(){
     + '&client_id=' + encodeURIComponent(key)
     + '&redirect_uri=' + encodeURIComponent(redirect)
     + '&scope=' + encodeURIComponent('full')
-    + '&state=' + encodeURIComponent(connEnv)
+    + '&state=' + encodeURIComponent(connEnv + '|' + prof)
     + '&prompt=login';
-  location.assign(url);
+  const w = window.open(url, 'sf_login', 'width=620,height=780');
+  if(!w){ err.textContent='Your browser blocked the popup. Allow popups for this site, then click Log in again.'; return; }
+  closeConnect();
 }
-async function handleOAuthReturn(){
+/* receive the token posted back from the login popup */
+window.addEventListener('message', ev=>{
+  if(ev.origin!==location.origin || !ev.data || !ev.data.pdcToken) return;
+  const p=new URLSearchParams(String(ev.data.pdcToken).replace(/^#/,''));
+  if(p.get('error')){ toast('Login failed: '+(p.get('error_description')||p.get('error'))); return; }
+  const st=p.get('state')||''; const sep=st.indexOf('|');
+  const env = sep>=0 ? st.slice(0,sep) : (pendingConnect&&pendingConnect.env);
+  const prof = sep>=0 ? st.slice(sep+1) : (pendingConnect&&pendingConnect.prof)||'';
+  pendingConnect=null;
+  finishConnect(env, p.get('instance_url'), p.get('access_token'), prof);
+});
+/* on load: if THIS window is the login popup, hand the token to the opener and close */
+function handleOAuthReturn(){
   const h=location.hash||'';
   if(h.indexOf('access_token=')===-1 && h.indexOf('error=')===-1) return;
+  if(window.opener && window.opener!==window){
+    try{ window.opener.postMessage({pdcToken:h}, location.origin); }catch(e){}
+    try{ document.body.innerHTML='<p style="font-family:system-ui,sans-serif;color:#8595b3;padding:40px;text-align:center">Signed in — you can close this window.</p>'; }catch(e){}
+    window.close();
+    return;
+  }
+  // fallback (popup blocked → full redirect happened): process inline
+  history.replaceState(null,'',location.origin+location.pathname);
   const p=new URLSearchParams(h.replace(/^#/,''));
-  history.replaceState(null,'',location.origin+location.pathname); // strip token from the address bar
   if(p.get('error')){ toast('Login failed: '+(p.get('error_description')||p.get('error'))); return; }
-  const token=p.get('access_token'), inst=p.get('instance_url'), env=p.get('state');
-  if(!token||!inst||!env) return;
-  let prof='';
-  try{ const pend=JSON.parse(sessionStorage.getItem('pdc_pending')||'{}'); prof=pend.prof||''; }catch(e){}
-  sessionStorage.removeItem('pdc_pending');
+  const st=p.get('state')||''; const sep=st.indexOf('|');
+  finishConnect(sep>=0?st.slice(0,sep):st, p.get('instance_url'), p.get('access_token'), sep>=0?st.slice(sep+1):'');
+}
+async function finishConnect(env, inst, token, prof){
+  if(!env||!inst||!token) return;
   if(!prof){ openConnect(env); $('#connUrl').value=inst; $('#connToken').value=token; $('#connErr').textContent='Logged in — enter the profile name and click Fetch with token.'; return; }
-  toast('Logged in to '+ENV_LABEL[env]+' — reading '+prof+'…');
+  $('#stat-'+env).textContent='⏳ reading '+prof+'…'; $('#stat-'+env).className='stat';
   try{
     const {cats,name}=await fetchProfile(inst,token,prof,()=>{});
     const total=CATS.reduce((s,c)=>s+cats[c.key].size,0);
-    if(!total) throw new Error('Connected, but no permissions returned for "'+prof+'".');
+    if(!total) throw new Error('no-perms');
     $('#ta-'+env).value = serializeProfile({license:'',customRaw:''}, cats);
     loadEnv(env);
     if(MODEL[env]) MODEL[env].name=name;
     $('#nm-'+env).textContent=name;
     $('#stat-'+env).textContent='✓ live · '+total+' perms'; $('#stat-'+env).className='stat good';
-    toast('Connected to '+ENV_LABEL[env]+' · '+name+' — connect the others, then Compare.');
+    toast('Connected to '+ENV_LABEL[env]+' · '+name);
   }catch(e){
-    toast(/Failed to fetch|NetworkError|TypeError/.test(String(e))
-      ? 'Logged in, but the profile read was blocked — add this origin to the org\u2019s CORS allowlist (Setup \u2192 CORS).'
-      : String(e.message||e));
+    const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
+    $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : (String(e.message||e)==='no-perms' ? '✗ no perms for that profile' : '✗ '+(e.message||e));
+    $('#stat-'+env).className='stat bad';
+    toast(cors ? 'Logged in, but the profile read was blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then click Log in again.'
+               : (String(e.message||e)==='no-perms' ? 'Logged in, but no permissions came back for "'+prof+'" — check the Profile API name.' : 'Read failed: '+(e.message||e)));
   }
 }
 const sescQ = s=>String(s).replace(/'/g,"\\'");
