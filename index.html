@@ -385,9 +385,9 @@
           <option value="sandbox">Sandbox (test.salesforce.com)</option>
         </select>
       </div>
-      <div class="field" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="password" placeholder="3MVG9…" autocomplete="off"></div>
+      <div class="field" id="connKeyRow" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="password" placeholder="3MVG9…" autocomplete="off"></div>
       <button class="btn primary" id="connOauth" style="width:100%">Log in with Salesforce →</button>
-      <div class="clihelp-n">Consumer Key: Setup → Connected Apps → your app → Manage Consumer Details. Saved in this browser only, never sent to the repo.</div>
+      <div class="clihelp-n">If set in the code, this is pre-filled for everyone — just click Log in. Otherwise paste it once (Setup → Connected Apps → your app → Manage Consumer Details); it's saved in your browser.</div>
     </div>
 
     <div style="display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em">
@@ -791,14 +791,18 @@ function wireCodeButtons(){
 
 /* ---------- LIVE CONNECT (REST) ---------- */
 let connEnv = null;
+// ── Set this ONCE and no teammate ever has to paste the Consumer Key. ──
+// A Consumer Key (Client ID) is a public OAuth identifier — safe to commit. (The Consumer SECRET is not; don't put that here.)
+const DEFAULT_CONSUMER_KEY = '3MVG9GCMQoQ6rpzTViwky6e4Z5H5nh_DA.l0ehIFzS0Ocakc_DGmq9dOc35ob2ADS0FcSxpLDwobPftNSB_Yz'; // Connected App Consumer Key — public OAuth client_id, safe to commit. (Do NOT put the Consumer Secret here.)
 const LS_KEY='pdc_consumer_key';
-function getKey(){ try{ return localStorage.getItem(LS_KEY)||''; }catch(e){ return ''; } }
+function getKey(){ try{ return localStorage.getItem(LS_KEY) || DEFAULT_CONSUMER_KEY || ''; }catch(e){ return DEFAULT_CONSUMER_KEY || ''; } }
 function saveKey(k){ try{ localStorage.setItem(LS_KEY,k); }catch(e){} }
 function openConnect(env){
   connEnv=env;
   $('#connEnvLbl').textContent='· '+ENV_LABEL[env];
   $('#connErr').textContent=''; $('#connProgress').textContent='';
   $('#connKey').value=getKey();
+  $('#connKeyRow').style.display = DEFAULT_CONSUMER_KEY ? 'none' : ''; // baked in → don't ask
   $('#overlay').classList.add('show');
   $('#connProfile').focus();
 }
