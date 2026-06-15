@@ -375,7 +375,7 @@
     <h3>Connect to Salesforce <span id="connEnvLbl" style="color:var(--accent)"></span></h3>
     <p class="msub">Reads the profile live via the REST API. Covers system, object, field-level, Apex, Visualforce, custom-permission and tab access.</p>
 
-    <div class="field"><label>Profile API name</label><input id="connProfile" placeholder="CAIS_Agency_Admin" autocomplete="off"></div>
+    <div class="field"><label>Profile API name <span style="color:var(--faint);text-transform:none;letter-spacing:0">(optional — leave blank to pick from a list after login)</span></label><input id="connProfile" placeholder="leave blank to choose after login" autocomplete="off"></div>
 
     <div class="clihelp" style="border-color:rgba(91,140,255,.4)">
       <div class="clihelp-h" style="color:var(--accent)">Log in with Salesforce (recommended)</div>
@@ -410,6 +410,22 @@ sf org display -o MyOrg --json</pre>
       <button class="btn" id="connGo">Fetch with token</button>
     </div>
     <p class="msub" style="margin:12px 0 0">Both paths need this site's origin in the org's CORS allowlist (Setup → CORS) to read the profile. App, record-type and layout visibility aren't exposed over REST — use the XML paste path for a complete profile.</p>
+  </div>
+</div>
+
+<!-- PROFILE PICKER -->
+<div class="overlay" id="pickerOverlay">
+  <div class="modal" style="max-width:430px">
+    <h3>Pick a profile <span id="pickEnvLbl" style="color:var(--accent)"></span></h3>
+    <p class="msub">Signed in. Choose which profile to read from this org — <span id="pickCount"></span>.</p>
+    <div class="field"><label>Profile</label>
+      <select id="pickSelect" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none"></select>
+    </div>
+    <div class="err" id="pickErr"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="pickCancel">Cancel</button>
+      <button class="btn primary" id="pickGo">Load profile</button>
+    </div>
   </div>
 </div>
 
@@ -816,7 +832,6 @@ function oauthLogin(){
   const key = DEFAULT_CONSUMER_KEY || $('#connKey').value.trim();
   const sandbox=$('#connEnvType').value==='sandbox';
   const err=$('#connErr'); err.textContent='';
-  if(!prof){ err.textContent='Enter the Profile API name first.'; $('#connProfile').focus(); return; }
   if(!key){ err.textContent='Paste your Connected App Consumer Key.'; $('#connKey').focus(); return; }
   if(!DEFAULT_CONSUMER_KEY) saveKey(key);
   pendingConnect = {env:connEnv, prof};
@@ -863,7 +878,34 @@ function handleOAuthReturn(){
 }
 async function finishConnect(env, inst, token, prof){
   if(!env||!inst||!token) return;
-  if(!prof){ openConnect(env); $('#connUrl').value=inst; $('#connToken').value=token; $('#connErr').textContent='Logged in — enter the profile name and click Fetch with token.'; return; }
+  // Load the org's profile list first — this also proves login + CORS work before we ask which profile.
+  $('#stat-'+env).textContent='⏳ loading profiles…'; $('#stat-'+env).className='stat';
+  let names;
+  try{
+    names = (await sfQuery(inst, token, 'SELECT Name FROM Profile ORDER BY Name')).map(p=>p.Name).filter(Boolean);
+  }catch(e){
+    const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
+    $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : '✗ '+(e.message||e);
+    $('#stat-'+env).className='stat bad';
+    toast(cors ? 'Logged in, but blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then Log in again.' : 'Failed: '+(e.message||e));
+    return;
+  }
+  const match = prof && names.find(n=> n.toLowerCase()===prof.toLowerCase());
+  if(match){ readProfile(env, inst, token, match); return; }
+  openPicker(env, inst, token, names, prof);
+}
+let pickCtx = null;
+function openPicker(env, inst, token, names, attempted){
+  pickCtx = {env, inst, token};
+  const sel = $('#pickSelect'); sel.innerHTML='';
+  names.slice().sort((a,b)=>a.localeCompare(b)).forEach(n=> sel.insertAdjacentHTML('beforeend', `<option value="${esc(n)}">${esc(n)}</option>`));
+  $('#pickEnvLbl').textContent='· '+ENV_LABEL[env];
+  $('#pickCount').textContent = names.length+' profiles found';
+  $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t one of them — pick from the list below.') : '';
+  $('#pickerOverlay').classList.add('show');
+  $('#stat-'+env).textContent='✓ logged in — pick a profile'; $('#stat-'+env).className='stat';
+}
+async function readProfile(env, inst, token, prof){
   $('#stat-'+env).textContent='⏳ reading '+prof+'…'; $('#stat-'+env).className='stat';
   try{
     const {cats,name}=await fetchProfile(inst,token,prof,()=>{});
@@ -879,8 +921,7 @@ async function finishConnect(env, inst, token, prof){
     const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
     $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : (String(e.message||e)==='no-perms' ? '✗ no perms for that profile' : '✗ '+(e.message||e));
     $('#stat-'+env).className='stat bad';
-    toast(cors ? 'Logged in, but the profile read was blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then click Log in again.'
-               : (String(e.message||e)==='no-perms' ? 'Logged in, but no permissions came back for "'+prof+'" — check the Profile API name.' : 'Read failed: '+(e.message||e)));
+    toast(cors ? 'Read blocked by CORS — add '+location.origin+' to Setup \u2192 CORS.' : (String(e.message||e)==='no-perms' ? 'No permissions came back for that profile.' : 'Read failed: '+(e.message||e)));
   }
 }
 const sescQ = s=>String(s).replace(/'/g,"\\'");
@@ -957,24 +998,9 @@ async function fetchProfile(inst,tok,profName,prog){
 async function doConnect(){
   const inst=$('#connUrl').value.trim(), tok=$('#connToken').value.trim(), prof=$('#connProfile').value.trim();
   const err=$('#connErr'); err.textContent='';
-  if(!inst||!tok||!prof){ err.textContent='Instance URL, access token and profile name are all required.'; return; }
-  const go=$('#connGo'); const orig=go.textContent; go.disabled=true; go.textContent='Fetching…';
-  try{
-    const {cats,name}=await fetchProfile(inst,tok,prof,m=>$('#connProgress').textContent=m);
-    const total=CATS.reduce((s,c)=>s+cats[c.key].size,0);
-    if(!total) throw new Error('Connected, but no permissions returned. Check the profile name and your API access.');
-    $('#ta-'+connEnv).value = serializeProfile({license:'',customRaw:''}, cats);
-    loadEnv(connEnv);
-    if(MODEL[connEnv]) MODEL[connEnv].name=name;
-    $('#nm-'+connEnv).textContent=name;
-    $('#stat-'+connEnv).textContent='✓ live · '+total+' perms'; $('#stat-'+connEnv).className='stat good';
-    closeConnect(); toast('Connected to '+ENV_LABEL[connEnv]+' · '+name);
-  }catch(e){
-    err.textContent = /Failed to fetch|NetworkError|TypeError/.test(String(e))
-      ? 'Couldn’t reach the org. Check the instance URL, and confirm this site’s origin is in the org’s CORS allowlist (Setup → CORS).'
-      : e.message;
-    $('#connProgress').textContent='';
-  } finally { go.disabled=false; go.textContent=orig; }
+  if(!inst||!tok){ err.textContent='Instance URL and access token are required.'; return; }
+  closeConnect();
+  finishConnect(connEnv, inst, tok, prof);
 }
 
 /* ---------- input handling ---------- */
@@ -1012,6 +1038,9 @@ $$('[data-connect]').forEach(b=>b.onclick=()=>openConnect(b.dataset.connect));
 $('#connCancel').onclick=closeConnect;
 $('#connGo').onclick=doConnect;
 $('#connOauth').onclick=oauthLogin;
+$('#pickCancel').onclick=()=>$('#pickerOverlay').classList.remove('show');
+$('#pickGo').onclick=()=>{ if(!pickCtx) return; const prof=$('#pickSelect').value; $('#pickerOverlay').classList.remove('show'); readProfile(pickCtx.env, pickCtx.inst, pickCtx.token, prof); };
+$('#pickerOverlay').onclick=e=>{ if(e.target.id==='pickerOverlay') $('#pickerOverlay').classList.remove('show'); };
 handleOAuthReturn();
 $('#overlay').onclick=e=>{ if(e.target.id==='overlay') closeConnect(); };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeConnect(); });
