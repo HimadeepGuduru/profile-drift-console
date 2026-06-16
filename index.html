@@ -387,43 +387,40 @@
 <div class="overlay" id="overlay">
   <div class="modal">
     <h3>Connect to Salesforce <span id="connEnvLbl" style="color:var(--accent)"></span></h3>
-    <p class="msub">Reads the profile live via the REST API. Covers system, object, field-level, Apex, Visualforce, custom-permission and tab access.</p>
+    <p class="msub">Reads the profile live via the REST API — you'll pick the profile after login.</p>
 
-    <div class="field"><label>Profile API name <span style="color:var(--faint);text-transform:none;letter-spacing:0">(optional — leave blank to pick from a list after login)</span></label><input id="connProfile" placeholder="leave blank to choose after login" autocomplete="off"></div>
-
-    <div class="clihelp" style="border-color:rgba(91,140,255,.4)">
-      <div class="clihelp-h" style="color:var(--accent)">Log in with Salesforce (recommended)</div>
-      <div class="field" style="margin-bottom:10px"><label>Environment</label>
-        <select id="connEnvType" style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none">
-          <option value="prod">Production / Developer (login.salesforce.com)</option>
-          <option value="sandbox">Sandbox (test.salesforce.com)</option>
-        </select>
-      </div>
-      <div class="field" id="connKeyRow" style="margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="3MVG9…"></div>
-      <button class="btn primary" id="connOauth" style="width:100%">Log in with Salesforce →</button>
-      <div class="clihelp-n">If set in the code, this is pre-filled for everyone — just click Log in. Otherwise paste it once (Setup → Connected Apps → your app → Manage Consumer Details); it's saved in your browser.</div>
+    <div class="field" style="margin:14px 0 10px"><label>Environment</label>
+      <select id="connEnvType" style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none">
+        <option value="prod">Production / Developer (login.salesforce.com)</option>
+        <option value="sandbox">Sandbox (test.salesforce.com)</option>
+      </select>
     </div>
-
-    <div style="display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em">
-      <span style="flex:1;height:1px;background:var(--line-soft)"></span>or paste a CLI token<span style="flex:1;height:1px;background:var(--line-soft)"></span>
-    </div>
-
-    <div class="clihelp">
-      <div class="clihelp-h">Token from the Salesforce CLI</div>
-      <pre>sf org login web -o MyOrg
-sf org display -o MyOrg --json</pre>
-      <div class="clihelp-n">Copy <code>instanceUrl</code> and <code>accessToken</code> from the JSON output.</div>
-    </div>
-    <div class="field"><label>Instance URL</label><input id="connUrl" placeholder="https://mydomain.my.salesforce.com" autocomplete="off"></div>
-    <div class="field"><label>Access token</label><input id="connToken" type="password" placeholder="00D...!AQ..." autocomplete="off"></div>
+    <div class="field" id="connKeyRow" style="display:none;margin-bottom:10px"><label>Connected App — Consumer Key</label><input id="connKey" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="3MVG9…"></div>
+    <button class="btn primary" id="connOauth" style="width:100%">Log in with Salesforce →</button>
 
     <div class="progress" id="connProgress"></div>
     <div class="err" id="connErr"></div>
-    <div class="modal-foot">
+
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;color:var(--faint);font-size:12px;user-select:none">Advanced — paste a CLI token, or pre-select a profile</summary>
+      <div style="margin-top:12px">
+        <div class="field"><label>Profile API name <span style="color:var(--faint);text-transform:none;letter-spacing:0">(optional)</span></label><input id="connProfile" placeholder="leave blank to choose after login" autocomplete="off"></div>
+        <div class="clihelp">
+          <div class="clihelp-h">Token from the Salesforce CLI</div>
+          <pre>sf org login web -o MyOrg
+sf org display -o MyOrg --json</pre>
+          <div class="clihelp-n">Copy <code>instanceUrl</code> and <code>accessToken</code> from the JSON output.</div>
+        </div>
+        <div class="field"><label>Instance URL</label><input id="connUrl" placeholder="https://mydomain.my.salesforce.com" autocomplete="off"></div>
+        <div class="field"><label>Access token</label><input id="connToken" type="password" placeholder="00D...!AQ..." autocomplete="off"></div>
+        <button class="btn" id="connGo" style="width:100%;margin-top:4px">Fetch with token</button>
+      </div>
+    </details>
+
+    <div class="modal-foot" style="margin-top:14px">
       <button class="btn ghost" id="connCancel">Cancel</button>
-      <button class="btn" id="connGo">Fetch with token</button>
     </div>
-    <p class="msub" style="margin:12px 0 0">Both paths need this site's origin in the org's CORS allowlist (Setup → CORS) to read the profile. App, record-type and layout visibility aren't exposed over REST — use the XML paste path for a complete profile.</p>
+    <p class="msub" style="margin:10px 0 0;font-size:11px">Needs this site's origin in the org's CORS allowlist (Setup → CORS). App, record-type and layout visibility aren't in the REST read — paste the XML for a complete profile.</p>
   </div>
 </div>
 
@@ -860,7 +857,7 @@ function openConnect(env){
   $('#connKey').value=getKey();
   $('#connKeyRow').style.display = DEFAULT_CONSUMER_KEY ? 'none' : ''; // baked in → don't ask
   $('#overlay').classList.add('show');
-  $('#connProfile').focus();
+  $('#connOauth').focus();
 }
 function closeConnect(){ $('#overlay').classList.remove('show'); }
 
@@ -1069,7 +1066,7 @@ async function doConnect(){
 function loadEnv(env){
   const raw = $('#ta-'+env).value.trim();
   const stat = $('#stat-'+env), nm=$('#nm-'+env);
-  if(!raw){ delete MODEL[env]; ENV_LABEL[env]=DEFAULT_LABEL[env]; refreshTitles(); stat.textContent=''; nm.textContent=''; return; }
+  if(!raw){ delete MODEL[env]; ENV_LABEL[env]=DEFAULT_LABEL[env]; refreshTitles(); stat.textContent=''; nm.textContent=''; if(typeof applyMode==='function') applyMode(); return; }
   try{
     const m = parseProfile(raw);
     m.name = guessName(raw) || ENV_LABEL[env]+'_Profile';
@@ -1078,6 +1075,7 @@ function loadEnv(env){
     stat.textContent='✓ '+total+' perms'; stat.className='stat good';
     nm.textContent=m.name;
   }catch(err){ delete MODEL[env]; stat.textContent='✗ '+err.message; stat.className='stat bad'; nm.textContent=''; }
+  if(typeof applyMode==='function') applyMode();
 }
 function guessName(xml){
   const m = xml.match(/<fullName>([^<]+)<\/fullName>/); if(m) return m[1].trim();
@@ -1101,15 +1099,19 @@ let COMPARE_MODE = 'across';
 function applyMode(){
   const same = COMPARE_MODE==='same';
   $$('.modebtn').forEach(b=>b.classList.toggle('active', b.dataset.mode===COMPARE_MODE));
-  // Across orgs: every column connects its own org. Within one org: only Org 1 connects; the rest fill from that login.
-  ['uat','prod'].forEach(env=>{
+  ENVS.forEach(env=>{
     const cbtn = document.querySelector('[data-connect="'+env+'"]');
     const up   = document.querySelector('input[type=file][data-env="'+env+'"]');
     const card = document.querySelector('.env.'+env);
-    if(same){ cbtn.setAttribute('disabled',''); if(up) up.closest('label').classList.add('disabled'); card.classList.toggle('locked', !MODEL[env]); }
-    else    { cbtn.removeAttribute('disabled'); if(up) up.closest('label').classList.remove('disabled'); card.classList.remove('locked'); }
+    const loaded = !!MODEL[env];
+    const modeLock = same && env!=='dev';          // within-one-org: only Org 1 connects
+    const lock = loaded || modeLock;               // a loaded column locks until Cleared
+    cbtn.toggleAttribute('disabled', lock);
+    if(up) up.closest('label').classList.toggle('disabled', lock);
+    card.classList.toggle('locked', modeLock && !loaded);
+    cbtn.textContent = loaded ? '✓ Loaded — Clear to change'
+      : (env==='dev' && same ? '⚡ Connect & pick profiles' : '⚡ Connect org');
   });
-  document.querySelector('[data-connect="dev"]').textContent = same ? '⚡ Connect & pick profiles' : '⚡ Connect org';
   $('#modeHint').textContent = same
     ? 'Connect Org 1 once, then tick up to 3 profiles — they fill every column.'
     : 'Connect each column to its own org — one profile per column.';
