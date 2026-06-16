@@ -76,6 +76,13 @@
   .mini.accent{border-color:var(--accent);color:var(--accent)}
   .mini.accent:hover{background:rgba(91,140,255,.12);color:var(--text)}
   .mini.file{position:relative;overflow:hidden}
+  .modebtn{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 13px;font-family:var(--body);font-size:12.5px;cursor:pointer;transition:.15s}
+  .modebtn:hover{border-color:var(--accent);color:var(--text)}
+  .modebtn.active{background:var(--accent);border-color:var(--accent);color:#08111f;font-weight:600}
+  .env.locked{opacity:.45;position:relative}
+  .env.locked textarea{pointer-events:none}
+  .mini[disabled]{opacity:.35;pointer-events:none}
+  .mini.file.disabled{opacity:.35;pointer-events:none}
   .mini.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
   .env-foot .stat{margin-left:auto;font-size:11px;font-family:var(--mono)}
   .stat.good{color:var(--ok)} .stat.bad{color:var(--risk)}
@@ -253,6 +260,13 @@
     <span><i style="background:var(--warn)"></i>Drift</span>
     <span><i style="background:var(--miss)"></i>Missing</span>
     <span><i style="background:var(--risk)"></i>Risk</span>
+  </div>
+
+  <div class="modeswitch" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 2px 14px;align-items:center">
+    <span style="font-size:12px;color:var(--faint);margin-right:2px">I'm comparing</span>
+    <button class="modebtn active" data-mode="across">Profiles across different orgs</button>
+    <button class="modebtn" data-mode="same">Profiles within one org</button>
+    <span id="modeHint" style="font-size:11px;color:var(--faint);margin-left:6px"></span>
   </div>
 
   <div class="loaders">
@@ -925,15 +939,18 @@ function openPicker(env, inst, token, names, attempted, orgName){
   // Columns this login can fill: its own column, plus other columns that are empty or already hold THIS org.
   // Columns holding a DIFFERENT org are protected so a multi-pick can't silently overwrite them.
   const others = ENVS.filter(e=>e!==env);
-  const fillable = [env, ...others.filter(e=> !MODEL[e] || ENV_LABEL[e]===orgName)];
+  const fillable = COMPARE_MODE==='across' ? [env] : [env, ...others.filter(e=> !MODEL[e] || ENV_LABEL[e]===orgName)];
   const maxPick = fillable.length;
   pickCtx = {env, inst, token, orgName, fillable, maxPick, names: names.slice().sort((a,b)=>a.localeCompare(b)), selected:new Set()};
   $('#pickEnvLbl').textContent='· '+(orgName||ENV_LABEL[env]);
-  const protectedNote = maxPick<ENVS.length ? ' Other columns hold a different org and are kept.' : '';
+  const protectedCount = others.filter(e=>MODEL[e] && ENV_LABEL[e]!==orgName).length;
+  const protectedNote = protectedCount ? ` ${protectedCount} other column${protectedCount>1?'s':''} hold a different org and ${protectedCount>1?'are':'is'} kept.` : '';
   const countNote = ` (${names.length} profiles in org.)`;
-  $('#pickMsub').textContent = (maxPick>1
-    ? `Signed in. Tick up to ${maxPick} profiles — they load into ${maxPick} columns from this one login.${protectedNote}`
-    : `Signed in. Tick one profile to load into this column.${protectedNote}`) + countNote;
+  $('#pickMsub').textContent = (COMPARE_MODE==='across'
+    ? `Signed in. You're comparing across orgs, so tick one profile to load into this column.`
+    : (maxPick>1
+        ? `Signed in. Tick up to ${maxPick} profiles — they load into ${maxPick} columns from this one login.${protectedNote}`
+        : `Signed in. Tick one profile to load into this column.${protectedNote}`)) + countNote;
   $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t found — pick from the list.') : '';
   $('#pickSearch').value='';
   renderPickList('');
@@ -1074,12 +1091,31 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
 
 /* ---------- wiring ---------- */
 ENVS.forEach(e=>{ $('#ta-'+e).addEventListener('input', ()=>loadEnv(e)); });
-$$('[data-clear]').forEach(b=>b.onclick=()=>{ const e=b.dataset.clear; $('#ta-'+e).value=''; loadEnv(e); });
+$$('[data-clear]').forEach(b=>b.onclick=()=>{ const e=b.dataset.clear; $('#ta-'+e).value=''; loadEnv(e); applyMode(); });
 $$('input[type=file]').forEach(inp=>inp.onchange=ev=>{
   const f=ev.target.files[0]; if(!f) return; const env=inp.dataset.env;
   const r=new FileReader(); r.onload=()=>{ $('#ta-'+env).value=r.result; loadEnv(env); }; r.readAsText(f);
 });
 $$('[data-connect]').forEach(b=>b.onclick=()=>openConnect(b.dataset.connect));
+let COMPARE_MODE = 'across';
+function applyMode(){
+  const same = COMPARE_MODE==='same';
+  $$('.modebtn').forEach(b=>b.classList.toggle('active', b.dataset.mode===COMPARE_MODE));
+  // Across orgs: every column connects its own org. Within one org: only Org 1 connects; the rest fill from that login.
+  ['uat','prod'].forEach(env=>{
+    const cbtn = document.querySelector('[data-connect="'+env+'"]');
+    const up   = document.querySelector('input[type=file][data-env="'+env+'"]');
+    const card = document.querySelector('.env.'+env);
+    if(same){ cbtn.setAttribute('disabled',''); if(up) up.closest('label').classList.add('disabled'); card.classList.toggle('locked', !MODEL[env]); }
+    else    { cbtn.removeAttribute('disabled'); if(up) up.closest('label').classList.remove('disabled'); card.classList.remove('locked'); }
+  });
+  document.querySelector('[data-connect="dev"]').textContent = same ? '⚡ Connect & pick profiles' : '⚡ Connect org';
+  $('#modeHint').textContent = same
+    ? 'Connect Org 1 once, then tick up to 3 profiles — they fill every column.'
+    : 'Connect each column to its own org — one profile per column.';
+}
+$$('[data-mode]').forEach(b=>b.onclick=()=>{ COMPARE_MODE=b.dataset.mode; applyMode(); });
+applyMode();
 $('#connCancel').onclick=closeConnect;
 $('#connGo').onclick=doConnect;
 $('#connOauth').onclick=oauthLogin;
@@ -1104,6 +1140,7 @@ $('#pickGo').onclick=async ()=>{
   toast(sel.length>1 ? ('Loading '+sel.length+' profiles…') : ('Loading '+sel[0]+'…'));
   // Load in parallel so all columns fill together, then render the comparison once.
   await Promise.all(targets.map((tgt,i)=> readProfile(tgt, inst, tok, sel[i], org)));
+  applyMode();
   if(activeEnvs().length>=2){ run(); toast('Loaded '+activeEnvs().length+' profiles — comparing.'); }
   else { toast('Loaded '+sel[0]+'. Add one more profile or org to compare.'); }
 };
@@ -1116,7 +1153,7 @@ $('#overlay').addEventListener('mousedown', e=>{ _connDown = (e.target.id==='ove
 $('#overlay').addEventListener('click', e=>{ if(e.target.id==='overlay' && _connDown) closeConnect(); _connDown=false; });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeConnect(); });
 $('#compareBtn').onclick=run;
-$('#clearAllBtn').onclick=()=>{ ENVS.forEach(e=>{$('#ta-'+e).value='';loadEnv(e);}); MODEL={}; $('#report').classList.add('hidden'); $('#emptyState').classList.remove('hidden'); };
+$('#clearAllBtn').onclick=()=>{ ENVS.forEach(e=>{$('#ta-'+e).value='';loadEnv(e);}); MODEL={}; applyMode(); $('#report').classList.add('hidden'); $('#emptyState').classList.remove('hidden'); };
 ['search','catFilter','statusFilter'].forEach(id=>$('#'+id).addEventListener('input',()=>DIFF&&applyFilters()));
 $('#riskOnly').addEventListener('change',()=>DIFF&&applyFilters());
 $('#genBtn').onclick=generateSync;
@@ -1155,6 +1192,7 @@ $('#sampleBtn').onclick=()=>{
   $('#ta-uat').value  = base({modifyAll:'false',manageUsers:'false', pwdNever:'false',acctViewAll:'false',objEdit:'true',  flsEdit:'true',  ssn:false, debugClass:false, bypass:'false', tab:'DefaultOn', ip:false});
   $('#ta-prod').value = base({modifyAll:'false',manageUsers:'true',  pwdNever:'false',acctViewAll:'false',objEdit:'false', flsEdit:'false', ssn:false, debugClass:false, bypass:'false', tab:'DefaultOff',ip:true});
   ENV_LABEL.dev='Dev Sandbox'; ENV_LABEL.uat='QA Sandbox'; ENV_LABEL.prod='Production'; refreshTitles();
+  COMPARE_MODE='across'; applyMode();
   ENVS.forEach(loadEnv); run();
   $('#nm-dev').textContent='Custom_App_User'; $('#nm-uat').textContent='Custom_App_User'; $('#nm-prod').textContent='Custom_App_User';
   toast('Demo loaded — explore each lens above');
