@@ -246,9 +246,9 @@
   </div>
 
   <div class="legend" style="margin:-6px 2px 14px">
-    <span><i style="background:var(--dev)"></i>Development</span>
-    <span><i style="background:var(--uat)"></i>UAT</span>
-    <span><i style="background:var(--prod)"></i>Production</span>
+    <span><i style="background:var(--dev)"></i>Org 1</span>
+    <span><i style="background:var(--uat)"></i>Org 2</span>
+    <span><i style="background:var(--prod)"></i>Org 3</span>
     <span style="margin-left:14px"><i style="background:var(--ok)"></i>Identical</span>
     <span><i style="background:var(--warn)"></i>Drift</span>
     <span><i style="background:var(--miss)"></i>Missing</span>
@@ -257,7 +257,7 @@
 
   <div class="loaders">
     <div class="env dev">
-      <div class="env-head"><span class="tag"></span>Development<span class="nm" id="nm-dev"></span></div>
+      <div class="env-head"><span class="tag"></span><span id="title-dev">Org 1</span><span class="nm" id="nm-dev"></span></div>
       <textarea id="ta-dev" placeholder="Connect an org, or paste Development .profile-meta.xml here…"></textarea>
       <div class="env-foot">
         <button class="mini accent" data-connect="dev">⚡ Connect org</button>
@@ -267,7 +267,7 @@
       </div>
     </div>
     <div class="env uat">
-      <div class="env-head"><span class="tag"></span>UAT<span class="nm" id="nm-uat"></span></div>
+      <div class="env-head"><span class="tag"></span><span id="title-uat">Org 2</span><span class="nm" id="nm-uat"></span></div>
       <textarea id="ta-uat" placeholder="Connect an org, or paste UAT .profile-meta.xml here…"></textarea>
       <div class="env-foot">
         <button class="mini accent" data-connect="uat">⚡ Connect org</button>
@@ -277,7 +277,7 @@
       </div>
     </div>
     <div class="env prod">
-      <div class="env-head"><span class="tag"></span>Production<span class="nm" id="nm-prod"></span></div>
+      <div class="env-head"><span class="tag"></span><span id="title-prod">Org 3</span><span class="nm" id="nm-prod"></span></div>
       <textarea id="ta-prod" placeholder="Connect an org, or paste Production .profile-meta.xml here…"></textarea>
       <div class="env-foot">
         <button class="mini accent" data-connect="prod">⚡ Connect org</button>
@@ -290,7 +290,7 @@
 
   <div class="actions">
     <button class="btn primary" id="compareBtn">Compare profiles</button>
-    <button class="btn ghost" id="sampleBtn">Load sample (CAIS Agency Admin)</button>
+    <button class="btn ghost" id="sampleBtn">Load demo data</button>
     <button class="btn ghost" id="clearAllBtn">Clear all</button>
     <span class="note">Live connect, or retrieve with <span style="font-family:var(--mono)">sf project retrieve start -m "Profile:Name"</span></span>
   </div>
@@ -415,16 +415,15 @@ sf org display -o MyOrg --json</pre>
 
 <!-- PROFILE PICKER -->
 <div class="overlay" id="pickerOverlay">
-  <div class="modal" style="max-width:430px">
-    <h3>Pick a profile <span id="pickEnvLbl" style="color:var(--accent)"></span></h3>
-    <p class="msub">Signed in. Choose which profile to read from this org — <span id="pickCount"></span>.</p>
-    <div class="field"><label>Profile</label>
-      <select id="pickSelect" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none"></select>
-    </div>
-    <div class="err" id="pickErr"></div>
+  <div class="modal" style="max-width:470px">
+    <h3>Pick profiles <span id="pickEnvLbl" style="color:var(--accent)"></span></h3>
+    <p class="msub">Signed in. Tick up to 3 profiles — they load into the columns from this one login. First pick fills this column; the rest fill the others. <span id="pickCount" style="color:var(--faint)"></span></p>
+    <input id="pickSearch" placeholder="Filter profiles…" autocomplete="off" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none;margin-bottom:10px">
+    <div id="pickList" style="max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px"></div>
+    <div class="err" id="pickErr" style="margin-top:8px"></div>
     <div class="modal-foot">
       <button class="btn ghost" id="pickCancel">Cancel</button>
-      <button class="btn primary" id="pickGo">Load profile</button>
+      <button class="btn primary" id="pickGo">Load selected</button>
     </div>
   </div>
 </div>
@@ -434,7 +433,13 @@ sf org display -o MyOrg --json</pre>
 <script>
 const NS_HINT = 'http://soap.sforce.com/2006/04/metadata';
 const ENVS = ['dev','uat','prod'];
-const ENV_LABEL = {dev:'Development', uat:'UAT', prod:'Production'};
+const ENV_LABEL = {dev:'Org 1', uat:'Org 2', prod:'Org 3'};
+const DEFAULT_LABEL = {dev:'Org 1', uat:'Org 2', prod:'Org 3'};
+function refreshTitles(){ ENVS.forEach(e=>{ const t=document.getElementById('title-'+e); if(t) t.textContent=ENV_LABEL[e]; }); }
+async function fetchOrgName(inst, token){
+  try{ const r=await sfQuery(inst, token, 'SELECT Name FROM Organization LIMIT 1'); if(r&&r[0]&&r[0].Name) return r[0].Name; }catch(e){}
+  try{ return new URL(inst).host.split('.')[0]; }catch(e){ return ''; }
+}
 const API_V = 'v61.0';
 
 const CATS = [
@@ -584,7 +589,7 @@ function renderGauge(){
 function renderDiff(){
   const active = activeEnvs();
   $('#diffHead').innerHTML = '<tr><th>Item</th><th>Category</th>'+
-    active.map(e=>`<th class="env-col ${e}"><span class="tag"></span>${ENV_LABEL[e]}</th>`).join('')+'<th>Status</th></tr>';
+    active.map(e=>`<th class="env-col ${e}"><span class="tag"></span>${esc(ENV_LABEL[e])}${MODEL[e]&&MODEL[e].name?`<div style="font-weight:400;font-size:9px;color:var(--faint);text-transform:none;letter-spacing:0;margin-top:2px">${esc(MODEL[e].name)}</div>`:''}</th>`).join('')+'<th>Status</th></tr>';
   applyFilters();
 }
 function applyFilters(){
@@ -761,14 +766,28 @@ function generateSync(){
   const xml = serializeProfile(MODEL[tgt], merged);
   const pname = MODEL[tgt].name;
   const pkg = packageXml(pname);
+  // Rollback: capture the target's CURRENT values for exactly the items being changed, so the admin can revert.
+  const rollback = {}; CATS.forEach(c=>{ rollback[c.key]=new Map(); });
+  const noRevert=[];
+  chosen.forEach(it=>{
+    if(MODEL[tgt].cats[it.cat].has(it.key)){ rollback[it.cat].set(it.key, MODEL[tgt].cats[it.cat].get(it.key)); }
+    else { noRevert.push(it.key.split(' · ')[0]+' ('+CATMAP[it.cat].label+')'); }
+  });
+  const hasRb = CATS.some(c=>rollback[c.key].size);
+  const rbXml = serializeProfile(MODEL[tgt], rollback);
   const cmd = `# Review the generated profile, commit, then deploy to your ${ENV_LABEL[tgt]} org:\nsf project deploy start -m "Profile:${pname}" -o ${ENV_LABEL[tgt].toUpperCase()}_ORG\n\n# Validate-only (recommended first) with tests:\nsf project deploy validate -m "Profile:${pname}" -l RunLocalTests -o ${ENV_LABEL[tgt].toUpperCase()}_ORG`;
+  const rbCmd = `# ROLLBACK — restores ${pname} on ${ENV_LABEL[tgt]} to its state BEFORE this sync:\nsf project deploy start -m "Profile:${pname}" -o ${ENV_LABEL[tgt].toUpperCase()}_ORG`;
   $('#syncOut').innerHTML = `
     <div class="infobox" style="margin-bottom:14px"><h3>Change audit — ${chosen.length} permission(s)</h3>
       ${audit.map(a=>`<div class="auditline">${a.startsWith('✓')?'<b>'+a+'</b>':a}</div>`).join('')}</div>
     ${codeBlock(`${pname}.profile-meta.xml`, xml, 'xml')}
     ${codeBlock('package.xml', pkg, 'xml')}
     ${codeBlock('deploy.sh', cmd, 'sh')}
-    <p style="color:var(--faint);font-size:12px">This package brings <b>${ENV_LABEL[tgt]}</b> in line with <b>${ENV_LABEL[src]}</b>. Commit it to source control and deploy through your pipeline — validate-only against Production first.</p>`;
+    <p style="color:var(--faint);font-size:12px">This package brings <b>${esc(ENV_LABEL[tgt])}</b> in line with <b>${esc(ENV_LABEL[src])}</b>. Commit it to source control and deploy through your pipeline — validate-only against Production first.</p>
+    <div class="infobox" style="margin-top:18px;border-color:var(--prod)"><h3 style="color:var(--prod)">↺ Rollback package</h3>
+      <p style="color:var(--faint);font-size:12px;margin:0 0 10px">Snapshot of <b>${esc(ENV_LABEL[tgt])}</b>'s current values for the items above. Deploy this to undo the sync.${noRevert.length?` <br><b style="color:var(--prod)">Note:</b> ${noRevert.length} item(s) are new to the target and can't be auto-reverted by a profile deploy — remove manually if needed: ${esc(noRevert.join(', '))}.`:''}</p>
+      ${hasRb ? codeBlock(`${pname}.rollback.profile-meta.xml`, rbXml, 'xml') + codeBlock('rollback.sh', rbCmd, 'sh') : '<p style="color:var(--faint);font-size:12px">All selected changes are net-new to the target, so there is no prior state to restore.</p>'}
+    </div>`;
   wireCodeButtons();
   toast(`Sync package generated · ${chosen.length} change(s)`);
 }
@@ -890,22 +909,32 @@ async function finishConnect(env, inst, token, prof){
     toast(cors ? 'Logged in, but blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then Log in again.' : 'Failed: '+(e.message||e));
     return;
   }
+  const orgName = await fetchOrgName(inst, token);
   const match = prof && names.find(n=> n.toLowerCase()===prof.toLowerCase());
-  if(match){ readProfile(env, inst, token, match); return; }
-  openPicker(env, inst, token, names, prof);
+  if(match){ readProfile(env, inst, token, match, orgName); return; }
+  openPicker(env, inst, token, names, prof, orgName);
 }
 let pickCtx = null;
-function openPicker(env, inst, token, names, attempted){
-  pickCtx = {env, inst, token};
-  const sel = $('#pickSelect'); sel.innerHTML='';
-  names.slice().sort((a,b)=>a.localeCompare(b)).forEach(n=> sel.insertAdjacentHTML('beforeend', `<option value="${esc(n)}">${esc(n)}</option>`));
-  $('#pickEnvLbl').textContent='· '+ENV_LABEL[env];
-  $('#pickCount').textContent = names.length+' profiles found';
-  $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t one of them — pick from the list below.') : '';
+function openPicker(env, inst, token, names, attempted, orgName){
+  pickCtx = {env, inst, token, orgName, names: names.slice().sort((a,b)=>a.localeCompare(b)), selected:new Set()};
+  $('#pickEnvLbl').textContent='· '+(orgName||ENV_LABEL[env]);
+  $('#pickCount').textContent = '('+names.length+' in org)';
+  $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t found — pick from the list.') : '';
+  $('#pickSearch').value='';
+  renderPickList('');
   $('#pickerOverlay').classList.add('show');
-  $('#stat-'+env).textContent='✓ logged in — pick a profile'; $('#stat-'+env).className='stat';
+  $('#pickSearch').focus();
+  $('#stat-'+env).textContent='✓ logged in — pick profile(s)'; $('#stat-'+env).className='stat';
 }
-async function readProfile(env, inst, token, prof){
+function renderPickList(filter){
+  const f=(filter||'').toLowerCase();
+  const items = pickCtx.names.filter(n=> !f || n.toLowerCase().includes(f));
+  $('#pickList').innerHTML = items.length
+    ? items.map(n=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--text)"><input type="checkbox" value="${esc(n)}" ${pickCtx.selected.has(n)?'checked':''} style="accent-color:var(--accent);width:15px;height:15px;flex:0 0 auto"><span>${esc(n)}</span></label>`).join('')
+    : '<div style="padding:14px;color:var(--faint);font-size:12px">No profiles match.</div>';
+}
+async function readProfile(env, inst, token, prof, orgName){
+  if(orgName){ ENV_LABEL[env]=orgName; refreshTitles(); }
   $('#stat-'+env).textContent='⏳ reading '+prof+'…'; $('#stat-'+env).className='stat';
   try{
     const {cats,name}=await fetchProfile(inst,token,prof,()=>{});
@@ -916,7 +945,7 @@ async function readProfile(env, inst, token, prof){
     if(MODEL[env]) MODEL[env].name=name;
     $('#nm-'+env).textContent=name;
     $('#stat-'+env).textContent='✓ live · '+total+' perms'; $('#stat-'+env).className='stat good';
-    toast('Connected to '+ENV_LABEL[env]+' · '+name);
+    toast('Connected · '+ENV_LABEL[env]+' · '+name);
   }catch(e){
     const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
     $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : (String(e.message||e)==='no-perms' ? '✗ no perms for that profile' : '✗ '+(e.message||e));
@@ -945,7 +974,7 @@ async function sfPermFields(inst,tok){
 async function fetchProfile(inst,tok,profName,prog){
   prog('Resolving profile…');
   const profs=await sfQuery(inst,tok,`SELECT Id,Name FROM Profile WHERE Name='${sescQ(profName)}'`);
-  if(!profs.length) throw new Error('Profile "'+profName+'" not found. Use the API name (e.g. Admin, CAIS_Agency_Admin).');
+  if(!profs.length) throw new Error('Profile "'+profName+'" not found. Use the API name (e.g. Admin, Custom_App_User).');
   const ps=await sfQuery(inst,tok,`SELECT Id FROM PermissionSet WHERE IsOwnedByProfile=true AND ProfileId='${profs[0].Id}'`);
   if(!ps.length) throw new Error('No owning permission set found for that profile.');
   const psId=ps[0].Id;
@@ -1007,7 +1036,7 @@ async function doConnect(){
 function loadEnv(env){
   const raw = $('#ta-'+env).value.trim();
   const stat = $('#stat-'+env), nm=$('#nm-'+env);
-  if(!raw){ delete MODEL[env]; stat.textContent=''; nm.textContent=''; return; }
+  if(!raw){ delete MODEL[env]; ENV_LABEL[env]=DEFAULT_LABEL[env]; refreshTitles(); stat.textContent=''; nm.textContent=''; return; }
   try{
     const m = parseProfile(raw);
     m.name = guessName(raw) || ENV_LABEL[env]+'_Profile';
@@ -1039,7 +1068,24 @@ $('#connCancel').onclick=closeConnect;
 $('#connGo').onclick=doConnect;
 $('#connOauth').onclick=oauthLogin;
 $('#pickCancel').onclick=()=>$('#pickerOverlay').classList.remove('show');
-$('#pickGo').onclick=()=>{ if(!pickCtx) return; const prof=$('#pickSelect').value; $('#pickerOverlay').classList.remove('show'); readProfile(pickCtx.env, pickCtx.inst, pickCtx.token, prof); };
+$('#pickSearch').addEventListener('input', e=> renderPickList(e.target.value));
+$('#pickList').addEventListener('change', e=>{
+  if(e.target.type!=='checkbox') return;
+  if(e.target.checked){
+    if(pickCtx.selected.size>=3){ e.target.checked=false; $('#pickErr').textContent='Up to 3 profiles at a time (one per column).'; return; }
+    pickCtx.selected.add(e.target.value);
+  } else { pickCtx.selected.delete(e.target.value); }
+  $('#pickErr').textContent = pickCtx.selected.size ? (pickCtx.selected.size+' selected') : '';
+});
+$('#pickGo').onclick=async ()=>{
+  if(!pickCtx) return;
+  const sel=[...pickCtx.selected];
+  if(!sel.length){ $('#pickErr').textContent='Tick at least one profile.'; return; }
+  $('#pickerOverlay').classList.remove('show');
+  const order=[pickCtx.env, ...ENVS.filter(e=>e!==pickCtx.env)];
+  const inst=pickCtx.inst, tok=pickCtx.token;
+  for(let i=0;i<sel.length && i<order.length;i++){ await readProfile(order[i], inst, tok, sel[i], pickCtx.orgName); }
+};
 $('#pickerOverlay').onclick=e=>{ if(e.target.id==='pickerOverlay') $('#pickerOverlay').classList.remove('show'); };
 handleOAuthReturn();
 $('#overlay').onclick=e=>{ if(e.target.id==='overlay') closeConnect(); };
@@ -1059,7 +1105,7 @@ $$('.lens').forEach(l=>l.onclick=()=>{
 /* sample data */
 $('#sampleBtn').onclick=()=>{
   const base=(opts)=>`<?xml version="1.0" encoding="UTF-8"?>
-<!-- name: CAIS_Agency_Admin -->
+<!-- name: Custom_App_User -->
 <Profile xmlns="http://soap.sforce.com/2006/04/metadata">
     <userPermissions><name>ApiEnabled</name><enabled>true</enabled></userPermissions>
     <userPermissions><name>ViewSetup</name><enabled>true</enabled></userPermissions>
@@ -1067,24 +1113,26 @@ $('#sampleBtn').onclick=()=>{
     <userPermissions><name>ManageUsers</name><enabled>${opts.manageUsers}</enabled></userPermissions>
     <userPermissions><name>PasswordNeverExpires</name><enabled>${opts.pwdNever}</enabled></userPermissions>
     <objectPermissions><object>Account</object><allowRead>true</allowRead><allowCreate>true</allowCreate><allowEdit>true</allowEdit><allowDelete>false</allowDelete><viewAllRecords>${opts.acctViewAll}</viewAllRecords><modifyAllRecords>false</modifyAllRecords></objectPermissions>
-    <objectPermissions><object>InsurancePolicyTransaction</object><allowRead>true</allowRead><allowCreate>true</allowCreate><allowEdit>${opts.iptEdit}</allowEdit><allowDelete>false</allowDelete><viewAllRecords>false</viewAllRecords><modifyAllRecords>false</modifyAllRecords></objectPermissions>
-    <fieldPermissions><field>Lead.FindUsOtherSources__c</field><readable>true</readable><editable>${opts.flsEdit}</editable></fieldPermissions>
+    <objectPermissions><object>Custom_Object__c</object><allowRead>true</allowRead><allowCreate>true</allowCreate><allowEdit>${opts.objEdit}</allowEdit><allowDelete>false</allowDelete><viewAllRecords>false</viewAllRecords><modifyAllRecords>false</modifyAllRecords></objectPermissions>
+    <fieldPermissions><field>Custom_Object__c.Status__c</field><readable>true</readable><editable>${opts.flsEdit}</editable></fieldPermissions>
     <fieldPermissions><field>Account.AnnualRevenue</field><readable>true</readable><editable>false</editable></fieldPermissions>
     ${opts.ssn?'<fieldPermissions><field>Contact.SSN__c</field><readable>true</readable><editable>true</editable></fieldPermissions>':''}
-    <classAccesses><apexClass>OnbProcessHelper</apexClass><enabled>true</enabled></classAccesses>
-    ${opts.debugClass?'<classAccesses><apexClass>InsQuoteService_Debug</apexClass><enabled>true</enabled></classAccesses>':''}
-    <pageAccesses><apexPage>AgencyOnboarding</apexPage><enabled>true</enabled></pageAccesses>
-    <customPermissions><name>CAIS_Bypass_Validation</name><enabled>${opts.bypass}</enabled></customPermissions>
-    <tabVisibilities><tab>Agency__c</tab><visibility>${opts.tab}</visibility></tabVisibilities>
-    <applicationVisibilities><application>CAIS_Console</application><default>true</default><visible>true</visible></applicationVisibilities>
+    <classAccesses><apexClass>BillingService</apexClass><enabled>true</enabled></classAccesses>
+    ${opts.debugClass?'<classAccesses><apexClass>DebugHelper</apexClass><enabled>true</enabled></classAccesses>':''}
+    <pageAccesses><apexPage>AccountOverview</apexPage><enabled>true</enabled></pageAccesses>
+    <customPermissions><name>Bypass_Validation_Rules</name><enabled>${opts.bypass}</enabled></customPermissions>
+    <tabVisibilities><tab>Custom_Object__c</tab><visibility>${opts.tab}</visibility></tabVisibilities>
+    <applicationVisibilities><application>standard__LightningSales</application><default>true</default><visible>true</visible></applicationVisibilities>
     ${opts.ip?'<loginIpRanges><startAddress>10.0.0.0</startAddress><endAddress>10.0.0.255</endAddress><description>Corp VPN</description></loginIpRanges>':''}
     <userLicense>Salesforce</userLicense>
 </Profile>`;
-  $('#ta-dev').value  = base({modifyAll:'true', manageUsers:'false', pwdNever:'true', acctViewAll:'true', iptEdit:'true',  flsEdit:'true',  ssn:true,  debugClass:true,  bypass:'true',  tab:'DefaultOn', ip:false});
-  $('#ta-uat').value  = base({modifyAll:'false',manageUsers:'false', pwdNever:'false',acctViewAll:'false',iptEdit:'true',  flsEdit:'true',  ssn:false, debugClass:false, bypass:'false', tab:'DefaultOn', ip:false});
-  $('#ta-prod').value = base({modifyAll:'false',manageUsers:'true',  pwdNever:'false',acctViewAll:'false',iptEdit:'false', flsEdit:'false', ssn:false, debugClass:false, bypass:'false', tab:'DefaultOff',ip:true});
+  $('#ta-dev').value  = base({modifyAll:'true', manageUsers:'false', pwdNever:'true', acctViewAll:'true', objEdit:'true',  flsEdit:'true',  ssn:true,  debugClass:true,  bypass:'true',  tab:'DefaultOn', ip:false});
+  $('#ta-uat').value  = base({modifyAll:'false',manageUsers:'false', pwdNever:'false',acctViewAll:'false',objEdit:'true',  flsEdit:'true',  ssn:false, debugClass:false, bypass:'false', tab:'DefaultOn', ip:false});
+  $('#ta-prod').value = base({modifyAll:'false',manageUsers:'true',  pwdNever:'false',acctViewAll:'false',objEdit:'false', flsEdit:'false', ssn:false, debugClass:false, bypass:'false', tab:'DefaultOff',ip:true});
+  ENV_LABEL.dev='Dev Sandbox'; ENV_LABEL.uat='QA Sandbox'; ENV_LABEL.prod='Production'; refreshTitles();
   ENVS.forEach(loadEnv); run();
-  toast('Sample loaded — explore each lens above');
+  $('#nm-dev').textContent='Custom_App_User'; $('#nm-uat').textContent='Custom_App_User'; $('#nm-prod').textContent='Custom_App_User';
+  toast('Demo loaded — explore each lens above');
 };
 </script>
 </body>
