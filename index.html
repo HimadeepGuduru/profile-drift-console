@@ -417,7 +417,7 @@ sf org display -o MyOrg --json</pre>
 <div class="overlay" id="pickerOverlay">
   <div class="modal" style="max-width:470px">
     <h3>Pick profiles <span id="pickEnvLbl" style="color:var(--accent)"></span></h3>
-    <p class="msub">Signed in. Tick up to 3 profiles — they load into the columns from this one login. First pick fills this column; the rest fill the others. <span id="pickCount" style="color:var(--faint)"></span></p>
+    <p class="msub" id="pickMsub">Signed in. Tick up to 3 profiles — they load into the columns from this one login. First pick fills this column; the rest fill the others. <span id="pickCount" style="color:var(--faint)"></span></p>
     <input id="pickSearch" placeholder="Filter profiles…" type="text" readonly name="pdc_filter_nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none;margin-bottom:10px">
     <div id="pickList" style="max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px"></div>
     <div class="err" id="pickErr" style="margin-top:8px"></div>
@@ -922,9 +922,18 @@ async function finishConnect(env, inst, token, prof){
 }
 let pickCtx = null;
 function openPicker(env, inst, token, names, attempted, orgName){
-  pickCtx = {env, inst, token, orgName, names: names.slice().sort((a,b)=>a.localeCompare(b)), selected:new Set()};
+  // Columns this login can fill: its own column, plus other columns that are empty or already hold THIS org.
+  // Columns holding a DIFFERENT org are protected so a multi-pick can't silently overwrite them.
+  const others = ENVS.filter(e=>e!==env);
+  const fillable = [env, ...others.filter(e=> !MODEL[e] || ENV_LABEL[e]===orgName)];
+  const maxPick = fillable.length;
+  pickCtx = {env, inst, token, orgName, fillable, maxPick, names: names.slice().sort((a,b)=>a.localeCompare(b)), selected:new Set()};
   $('#pickEnvLbl').textContent='· '+(orgName||ENV_LABEL[env]);
-  $('#pickCount').textContent = '('+names.length+' in org)';
+  const protectedNote = maxPick<ENVS.length ? ' Other columns hold a different org and are kept.' : '';
+  const countNote = ` (${names.length} profiles in org.)`;
+  $('#pickMsub').textContent = (maxPick>1
+    ? `Signed in. Tick up to ${maxPick} profiles — they load into ${maxPick} columns from this one login.${protectedNote}`
+    : `Signed in. Tick one profile to load into this column.${protectedNote}`) + countNote;
   $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t found — pick from the list.') : '';
   $('#pickSearch').value='';
   renderPickList('');
@@ -1080,7 +1089,7 @@ $('#pickSearch').addEventListener('input', e=> renderPickList(e.target.value));
 $('#pickList').addEventListener('change', e=>{
   if(e.target.type!=='checkbox') return;
   if(e.target.checked){
-    if(pickCtx.selected.size>=3){ e.target.checked=false; $('#pickErr').textContent='Up to 3 profiles at a time (one per column).'; return; }
+    if(pickCtx.selected.size>=pickCtx.maxPick){ e.target.checked=false; $('#pickErr').textContent=`This login can fill ${pickCtx.maxPick} column${pickCtx.maxPick>1?'s':''}. Deselect one first, or clear another column.`; return; }
     pickCtx.selected.add(e.target.value);
   } else { pickCtx.selected.delete(e.target.value); }
   $('#pickErr').textContent = pickCtx.selected.size ? (pickCtx.selected.size+' selected') : '';
@@ -1090,9 +1099,13 @@ $('#pickGo').onclick=async ()=>{
   const sel=[...pickCtx.selected];
   if(!sel.length){ $('#pickErr').textContent='Tick at least one profile.'; return; }
   $('#pickerOverlay').classList.remove('show');
-  const order=[pickCtx.env, ...ENVS.filter(e=>e!==pickCtx.env)];
-  const inst=pickCtx.inst, tok=pickCtx.token;
-  for(let i=0;i<sel.length && i<order.length;i++){ await readProfile(order[i], inst, tok, sel[i], pickCtx.orgName); }
+  const inst=pickCtx.inst, tok=pickCtx.token, org=pickCtx.orgName;
+  const targets = pickCtx.fillable.slice(0, sel.length);
+  toast(sel.length>1 ? ('Loading '+sel.length+' profiles…') : ('Loading '+sel[0]+'…'));
+  // Load in parallel so all columns fill together, then render the comparison once.
+  await Promise.all(targets.map((tgt,i)=> readProfile(tgt, inst, tok, sel[i], org)));
+  if(activeEnvs().length>=2){ run(); toast('Loaded '+activeEnvs().length+' profiles — comparing.'); }
+  else { toast('Loaded '+sel[0]+'. Add one more profile or org to compare.'); }
 };
 let _pickDown=false;
 $('#pickerOverlay').addEventListener('mousedown', e=>{ _pickDown = (e.target.id==='pickerOverlay'); });
