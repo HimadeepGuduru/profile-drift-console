@@ -452,9 +452,14 @@ function refreshTitles(){ ENVS.forEach(e=>{ const t=document.getElementById('tit
 function slotPrimary(e){ const org=ENV_LABEL[e], prof=MODEL[e]&&MODEL[e].name; if(!prof) return org; const sameOrg=activeEnvs().some(o=>o!==e && ENV_LABEL[o]===org); return sameOrg ? prof : org; }
 function slotSecondary(e){ const org=ENV_LABEL[e], prof=MODEL[e]&&MODEL[e].name; if(!prof) return ''; const sameOrg=activeEnvs().some(o=>o!==e && ENV_LABEL[o]===org); return sameOrg ? org : prof; }
 function slotFull(e){ const a=slotPrimary(e), b=slotSecondary(e); return b ? a+' · '+b : a; }
-async function fetchOrgName(inst, token){
-  try{ const r=await sfQuery(inst, token, 'SELECT Name FROM Organization LIMIT 1'); if(r&&r[0]&&r[0].Name) return r[0].Name; }catch(e){}
-  try{ return new URL(inst).host.split('.')[0]; }catch(e){ return ''; }
+function fetchOrgName(inst){
+  // The company Organization.Name is identical across all sandboxes, so it can't tell dev/uat/prod apart.
+  // The My Domain host carries the sandbox name: mgalive--dev.sandbox.my.salesforce.com → "mgalive (dev)".
+  try{
+    const sub = new URL(inst).host.split('.')[0];   // e.g. "mgalive--dev" or "mgalive"
+    if(sub.includes('--')){ const [base, sbx] = sub.split('--'); return `${base} (${sbx})`; }
+    return `${sub} (prod)`;
+  }catch(e){ return ''; }
 }
 const API_V = 'v61.0';
 
@@ -926,7 +931,7 @@ async function finishConnect(env, inst, token, prof){
     toast(cors ? 'Logged in, but blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then Log in again.' : 'Failed: '+(e.message||e));
     return;
   }
-  const orgName = await fetchOrgName(inst, token);
+  const orgName = fetchOrgName(inst);
   const match = prof && names.find(n=> n.toLowerCase()===prof.toLowerCase());
   if(match){ readProfile(env, inst, token, match, orgName); return; }
   openPicker(env, inst, token, names, prof, orgName);
