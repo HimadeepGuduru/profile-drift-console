@@ -236,7 +236,7 @@
   <div class="top">
     <div class="brand">
       <h1><span class="dot"></span>Profile Drift Console</h1>
-      <p>Compare Salesforce profiles across Dev · UAT · Prod, audit permission risk, and generate a deployable sync.</p>
+      <p>Compare Salesforce profiles across orgs — or within one org — audit permission risk, and generate a deployable sync with rollback.</p>
     </div>
     <div class="spacer"></div>
     <div class="gauge">
@@ -418,7 +418,7 @@ sf org display -o MyOrg --json</pre>
   <div class="modal" style="max-width:470px">
     <h3>Pick profiles <span id="pickEnvLbl" style="color:var(--accent)"></span></h3>
     <p class="msub">Signed in. Tick up to 3 profiles — they load into the columns from this one login. First pick fills this column; the rest fill the others. <span id="pickCount" style="color:var(--faint)"></span></p>
-    <input id="pickSearch" placeholder="Filter profiles…" autocomplete="off" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none;margin-bottom:10px">
+    <input id="pickSearch" placeholder="Filter profiles…" type="text" readonly name="pdc_filter_nofill" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none;margin-bottom:10px">
     <div id="pickList" style="max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px"></div>
     <div class="err" id="pickErr" style="margin-top:8px"></div>
     <div class="modal-foot">
@@ -436,6 +436,11 @@ const ENVS = ['dev','uat','prod'];
 const ENV_LABEL = {dev:'Org 1', uat:'Org 2', prod:'Org 3'};
 const DEFAULT_LABEL = {dev:'Org 1', uat:'Org 2', prod:'Org 3'};
 function refreshTitles(){ ENVS.forEach(e=>{ const t=document.getElementById('title-'+e); if(t) t.textContent=ENV_LABEL[e]; }); }
+// When several columns are the SAME org, the org name repeats and tells you nothing — so lead with the profile.
+// When orgs differ (e.g. same profile across Dev/UAT), lead with the org. slotSecondary returns the other piece.
+function slotPrimary(e){ const org=ENV_LABEL[e], prof=MODEL[e]&&MODEL[e].name; if(!prof) return org; const sameOrg=activeEnvs().some(o=>o!==e && ENV_LABEL[o]===org); return sameOrg ? prof : org; }
+function slotSecondary(e){ const org=ENV_LABEL[e], prof=MODEL[e]&&MODEL[e].name; if(!prof) return ''; const sameOrg=activeEnvs().some(o=>o!==e && ENV_LABEL[o]===org); return sameOrg ? org : prof; }
+function slotFull(e){ const a=slotPrimary(e), b=slotSecondary(e); return b ? a+' · '+b : a; }
 async function fetchOrgName(inst, token){
   try{ const r=await sfQuery(inst, token, 'SELECT Name FROM Organization LIMIT 1'); if(r&&r[0]&&r[0].Name) return r[0].Name; }catch(e){}
   try{ return new URL(inst).host.split('.')[0]; }catch(e){ return ''; }
@@ -572,7 +577,7 @@ function counts(){
 function renderCards(active){
   const c = counts();
   $('#cards').innerHTML = `
-    <div class="card"><div class="k">Permissions compared</div><div class="v">${c.total}</div><div class="sub">${active.map(e=>ENV_LABEL[e]).join(' · ')}</div></div>
+    <div class="card"><div class="k">Permissions compared</div><div class="v">${c.total}</div><div class="sub">${active.map(e=>esc(slotPrimary(e))).join(' · ')}</div></div>
     <div class="card ok"><div class="k">Identical</div><div class="v">${c.identical}</div><div class="sub">${pct(c.identical,c.total)}% aligned</div></div>
     <div class="card warn"><div class="k">Drift</div><div class="v">${c.drift}</div><div class="sub">same item, different values</div></div>
     <div class="card miss"><div class="k">Missing</div><div class="v">${c.missing}</div><div class="sub">present in some envs only</div></div>
@@ -589,7 +594,7 @@ function renderGauge(){
 function renderDiff(){
   const active = activeEnvs();
   $('#diffHead').innerHTML = '<tr><th>Item</th><th>Category</th>'+
-    active.map(e=>`<th class="env-col ${e}"><span class="tag"></span>${esc(ENV_LABEL[e])}${MODEL[e]&&MODEL[e].name?`<div style="font-weight:400;font-size:9px;color:var(--faint);text-transform:none;letter-spacing:0;margin-top:2px">${esc(MODEL[e].name)}</div>`:''}</th>`).join('')+'<th>Status</th></tr>';
+    active.map(e=>`<th class="env-col ${e}"><span class="tag"></span>${esc(slotPrimary(e))}${slotSecondary(e)?`<div style="font-weight:400;font-size:9px;color:var(--faint);text-transform:none;letter-spacing:0;margin-top:2px">${esc(slotSecondary(e))}</div>`:''}</th>`).join('')+'<th>Status</th></tr>';
   applyFilters();
 }
 function applyFilters(){
@@ -716,8 +721,8 @@ function humanCat(k){
 /* ---------- SYNC ---------- */
 function setupSync(active){
   const ss=$('#syncSource'), st=$('#syncTarget'); ss.innerHTML=''; st.innerHTML='';
-  active.forEach(e=>{ ss.insertAdjacentHTML('beforeend',`<option value="${e}">${ENV_LABEL[e]}</option>`);
-                      st.insertAdjacentHTML('beforeend',`<option value="${e}">${ENV_LABEL[e]}</option>`); });
+  active.forEach(e=>{ ss.insertAdjacentHTML('beforeend',`<option value="${e}">${esc(slotFull(e))}</option>`);
+                      st.insertAdjacentHTML('beforeend',`<option value="${e}">${esc(slotFull(e))}</option>`); });
   ss.value = active.includes('prod')?'prod':active[0];
   st.value = active.find(e=>e!==ss.value);
   ss.onchange=st.onchange=renderSyncItems; renderSyncItems();
@@ -734,9 +739,9 @@ function syncDeltas(){
       const tSig=tf?c.vals.map(v=>fmt(tf[v])).join('|'):null;
       if(sSig===tSig) return;
       let action;
-      if(sf&&!tf) action='Add to '+ENV_LABEL[tgt];
-      else if(!sf&&tf) action='Remove from '+ENV_LABEL[tgt];
-      else action='Update '+ENV_LABEL[tgt]+' to match';
+      if(sf&&!tf) action='Add to '+slotPrimary(tgt);
+      else if(!sf&&tf) action='Remove from '+slotPrimary(tgt);
+      else action='Update '+slotPrimary(tgt)+' to match';
       items.push({cat:c.key,key:k,sf,action,remove:(!sf&&tf)});
     });
   });
@@ -745,7 +750,7 @@ function syncDeltas(){
 function renderSyncItems(){
   const {src,tgt,items}=syncDeltas(); const body=$('#syncBody');
   if(src===tgt){ body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--warn)">Source and target must differ.</td></tr>'; $('#syncOut').innerHTML=''; return; }
-  if(!items.length){ body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ok)">'+ENV_LABEL[tgt]+' already matches '+ENV_LABEL[src]+'. Nothing to sync.</td></tr>'; $('#syncOut').innerHTML=''; return; }
+  if(!items.length){ body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ok)">'+esc(slotPrimary(tgt))+' already matches '+esc(slotPrimary(src))+'. Nothing to sync.</td></tr>'; $('#syncOut').innerHTML=''; return; }
   body.innerHTML = items.map((it,i)=>`<tr><td><input type="checkbox" class="syncchk" data-i="${i}" ${it.remove?'':'checked'}></td>
     <td><span class="item">${esc(it.key.split(' · ')[0])}</span></td>
     <td><span class="cat-badge">${CATMAP[it.cat].label}</span></td>
@@ -775,17 +780,18 @@ function generateSync(){
   });
   const hasRb = CATS.some(c=>rollback[c.key].size);
   const rbXml = serializeProfile(MODEL[tgt], rollback);
-  const cmd = `# Review the generated profile, commit, then deploy to your ${ENV_LABEL[tgt]} org:\nsf project deploy start -m "Profile:${pname}" -o ${ENV_LABEL[tgt].toUpperCase()}_ORG\n\n# Validate-only (recommended first) with tests:\nsf project deploy validate -m "Profile:${pname}" -l RunLocalTests -o ${ENV_LABEL[tgt].toUpperCase()}_ORG`;
-  const rbCmd = `# ROLLBACK — restores ${pname} on ${ENV_LABEL[tgt]} to its state BEFORE this sync:\nsf project deploy start -m "Profile:${pname}" -o ${ENV_LABEL[tgt].toUpperCase()}_ORG`;
+  const alias = (slotPrimary(tgt)||'TARGET').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,28) || 'TARGET';
+  const cmd = `# Review the generated profile, commit, then deploy to your ${slotPrimary(tgt)} target (replace ${alias}_ORG with your sf CLI org alias):\nsf project deploy start -m "Profile:${pname}" -o ${alias}_ORG\n\n# Validate-only (recommended first) with tests:\nsf project deploy validate -m "Profile:${pname}" -l RunLocalTests -o ${alias}_ORG`;
+  const rbCmd = `# ROLLBACK — restores ${pname} to its state BEFORE this sync (replace ${alias}_ORG with your org alias):\nsf project deploy start -m "Profile:${pname}" -o ${alias}_ORG`;
   $('#syncOut').innerHTML = `
     <div class="infobox" style="margin-bottom:14px"><h3>Change audit — ${chosen.length} permission(s)</h3>
       ${audit.map(a=>`<div class="auditline">${a.startsWith('✓')?'<b>'+a+'</b>':a}</div>`).join('')}</div>
     ${codeBlock(`${pname}.profile-meta.xml`, xml, 'xml')}
     ${codeBlock('package.xml', pkg, 'xml')}
     ${codeBlock('deploy.sh', cmd, 'sh')}
-    <p style="color:var(--faint);font-size:12px">This package brings <b>${esc(ENV_LABEL[tgt])}</b> in line with <b>${esc(ENV_LABEL[src])}</b>. Commit it to source control and deploy through your pipeline — validate-only against Production first.</p>
+    <p style="color:var(--faint);font-size:12px">This package brings <b>${esc(slotFull(tgt))}</b> in line with <b>${esc(slotFull(src))}</b>. Commit it to source control and deploy through your pipeline — validate-only against Production first.</p>
     <div class="infobox" style="margin-top:18px;border-color:var(--prod)"><h3 style="color:var(--prod)">↺ Rollback package</h3>
-      <p style="color:var(--faint);font-size:12px;margin:0 0 10px">Snapshot of <b>${esc(ENV_LABEL[tgt])}</b>'s current values for the items above. Deploy this to undo the sync.${noRevert.length?` <br><b style="color:var(--prod)">Note:</b> ${noRevert.length} item(s) are new to the target and can't be auto-reverted by a profile deploy — remove manually if needed: ${esc(noRevert.join(', '))}.`:''}</p>
+      <p style="color:var(--faint);font-size:12px;margin:0 0 10px">Snapshot of <b>${esc(slotFull(tgt))}</b>'s current values for the items above. Deploy this to undo the sync.${noRevert.length?` <br><b style="color:var(--prod)">Note:</b> ${noRevert.length} item(s) are new to the target and can't be auto-reverted by a profile deploy — remove manually if needed: ${esc(noRevert.join(', '))}.`:''}</p>
       ${hasRb ? codeBlock(`${pname}.rollback.profile-meta.xml`, rbXml, 'xml') + codeBlock('rollback.sh', rbCmd, 'sh') : '<p style="color:var(--faint);font-size:12px">All selected changes are net-new to the target, so there is no prior state to restore.</p>'}
     </div>`;
   wireCodeButtons();
@@ -923,7 +929,8 @@ function openPicker(env, inst, token, names, attempted, orgName){
   $('#pickSearch').value='';
   renderPickList('');
   $('#pickerOverlay').classList.add('show');
-  $('#pickSearch').focus();
+  // Belt-and-suspenders against Chrome autofilling the filter with an email/username after the modal appears.
+  [60,250,600].forEach(t=>setTimeout(()=>{ const s=$('#pickSearch'); if(s.value && !pickCtx.names.some(n=>n.toLowerCase().includes(s.value.toLowerCase()))){ s.value=''; renderPickList(''); } }, t));
   $('#stat-'+env).textContent='✓ logged in — pick profile(s)'; $('#stat-'+env).className='stat';
 }
 function renderPickList(filter){
@@ -1068,6 +1075,7 @@ $('#connCancel').onclick=closeConnect;
 $('#connGo').onclick=doConnect;
 $('#connOauth').onclick=oauthLogin;
 $('#pickCancel').onclick=()=>$('#pickerOverlay').classList.remove('show');
+$('#pickSearch').addEventListener('focus', e=>e.target.removeAttribute('readonly'));
 $('#pickSearch').addEventListener('input', e=> renderPickList(e.target.value));
 $('#pickList').addEventListener('change', e=>{
   if(e.target.type!=='checkbox') return;
@@ -1086,9 +1094,13 @@ $('#pickGo').onclick=async ()=>{
   const inst=pickCtx.inst, tok=pickCtx.token;
   for(let i=0;i<sel.length && i<order.length;i++){ await readProfile(order[i], inst, tok, sel[i], pickCtx.orgName); }
 };
-$('#pickerOverlay').onclick=e=>{ if(e.target.id==='pickerOverlay') $('#pickerOverlay').classList.remove('show'); };
+let _pickDown=false;
+$('#pickerOverlay').addEventListener('mousedown', e=>{ _pickDown = (e.target.id==='pickerOverlay'); });
+$('#pickerOverlay').addEventListener('click', e=>{ if(e.target.id==='pickerOverlay' && _pickDown) $('#pickerOverlay').classList.remove('show'); _pickDown=false; });
 handleOAuthReturn();
-$('#overlay').onclick=e=>{ if(e.target.id==='overlay') closeConnect(); };
+let _connDown=false;
+$('#overlay').addEventListener('mousedown', e=>{ _connDown = (e.target.id==='overlay'); });
+$('#overlay').addEventListener('click', e=>{ if(e.target.id==='overlay' && _connDown) closeConnect(); _connDown=false; });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeConnect(); });
 $('#compareBtn').onclick=run;
 $('#clearAllBtn').onclick=()=>{ ENVS.forEach(e=>{$('#ta-'+e).value='';loadEnv(e);}); MODEL={}; $('#report').classList.add('hidden'); $('#emptyState').classList.remove('hidden'); };
