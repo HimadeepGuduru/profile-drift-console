@@ -377,6 +377,10 @@
         <button class="btn ghost" id="selNone" style="padding:7px 13px">None</button>
         <button class="btn primary" id="genBtn" style="padding:8px 16px">Generate sync package</button>
       </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:0 0 10px">
+        <input id="syncSearch" placeholder="Search items (field, object, Apex class, permission…)" autocomplete="off" style="flex:1;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-family:var(--body);font-size:13px;outline:none">
+        <span id="syncSearchCount" style="font-size:11px;color:var(--faint);white-space:nowrap"></span>
+      </div>
       <div class="panel syncitems"><table><thead><tr><th style="width:40px"></th><th>Item</th><th>Category</th><th>Action</th></tr></thead><tbody id="syncBody"></tbody></table></div>
       <div id="syncOut"></div>
     </section>
@@ -767,11 +771,18 @@ function renderSyncItems(){
   const {src,tgt,items}=syncDeltas(); const body=$('#syncBody');
   if(src===tgt){ body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--warn)">Source and target must differ.</td></tr>'; $('#syncOut').innerHTML=''; return; }
   if(!items.length){ body.innerHTML='<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ok)">'+esc(slotPrimary(tgt))+' already matches '+esc(slotPrimary(src))+'. Nothing to sync.</td></tr>'; $('#syncOut').innerHTML=''; return; }
-  body.innerHTML = items.map((it,i)=>`<tr><td><input type="checkbox" class="syncchk" data-i="${i}" ${it.remove?'':'checked'}></td>
+  body.innerHTML = items.map((it,i)=>`<tr data-search="${esc((it.key.split(' · ')[0]+' '+CATMAP[it.cat].label+' '+it.action).toLowerCase())}"><td><input type="checkbox" class="syncchk" data-i="${i}" ${it.remove?'':'checked'}></td>
     <td><span class="item">${esc(it.key.split(' · ')[0])}</span></td>
     <td><span class="cat-badge">${CATMAP[it.cat].label}</span></td>
     <td><span class="val">${it.action}</span></td></tr>`).join('');
   $('#syncOut').innerHTML='';
+  filterSyncRows();
+}
+function filterSyncRows(){
+  const q=($('#syncSearch')?$('#syncSearch').value:'').trim().toLowerCase();
+  const rows=$$('#syncBody tr'); let shown=0;
+  rows.forEach(r=>{ const hit=!q || (r.dataset.search||'').includes(q); r.style.display=hit?'':'none'; if(hit) shown++; });
+  const c=$('#syncSearchCount'); if(c) c.textContent = q ? `${shown} of ${rows.length} shown` : '';
 }
 function generateSync(){
   const {src,tgt,items}=syncDeltas();
@@ -797,7 +808,14 @@ function generateSync(){
   const hasRb = CATS.some(c=>rollback[c.key].size);
   const rbXml = serializeProfile(MODEL[tgt], rollback);
   const alias = (slotPrimary(tgt)||'TARGET').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,28) || 'TARGET';
-  const cmd = `# Review the generated profile, commit, then deploy to your ${slotPrimary(tgt)} target (replace ${alias}_ORG with your sf CLI org alias):\nsf project deploy start -m "Profile:${pname}" -o ${alias}_ORG\n\n# Validate-only (recommended first) with tests:\nsf project deploy validate -m "Profile:${pname}" -l RunLocalTests -o ${alias}_ORG`;
+  const cmd = `# 1) Validate first — no changes committed, runs tests, reports every component (replace ${alias}_ORG with your sf CLI alias):
+sf project deploy validate -m "Profile:${pname}" -l RunLocalTests -o ${alias}_ORG
+
+# 2) Deploy — streams live status: Pending → InProgress → Succeeded/Failed, components deployed / total, % done, and the exact error + component on any failure:
+sf project deploy start -m "Profile:${pname}" -o ${alias}_ORG
+
+# Check status or resume a long-running deploy from another terminal:
+sf project deploy report -o ${alias}_ORG`;
   const rbCmd = `# ROLLBACK — restores ${pname} to its state BEFORE this sync (replace ${alias}_ORG with your org alias):\nsf project deploy start -m "Profile:${pname}" -o ${alias}_ORG`;
   $('#syncOut').innerHTML = `
     <div class="infobox" style="margin-bottom:14px"><h3>Change audit — ${chosen.length} permission(s)</h3>
@@ -806,6 +824,10 @@ function generateSync(){
     ${codeBlock('package.xml', pkg, 'xml')}
     ${codeBlock('deploy.sh', cmd, 'sh')}
     <p style="color:var(--faint);font-size:12px">This package brings <b>${esc(slotFull(tgt))}</b> in line with <b>${esc(slotFull(src))}</b>. Commit it to source control and deploy through your pipeline — validate-only against Production first.</p>
+    <div class="infobox" style="margin-top:18px"><h3>Deploy lifecycle &amp; what happens on failure</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">Salesforce metadata deploys are <b>atomic</b>. If any component fails, the <b>entire deploy is rolled back automatically</b> and the target is left exactly as it was — there is no half-applied state. The <code>sf project deploy start</code> command above streams the live status, the count of components deployed vs total, the percentage complete, and the precise error message and component for any failure (<code>deploy report</code> shows the same for an in-flight deploy).</p>
+      <p style="color:var(--faint);font-size:12px;margin:0">So a <b>failed</b> deploy needs no rollback — Salesforce already reverted it. The rollback package below is for the other case: undoing a deploy that <b>succeeded</b> but that you later decide to revert.</p>
+    </div>
     <div class="infobox" style="margin-top:18px;border-color:var(--prod)"><h3 style="color:var(--prod)">↺ Rollback package</h3>
       <p style="color:var(--faint);font-size:12px;margin:0 0 10px">Snapshot of <b>${esc(slotFull(tgt))}</b>'s current values for the items above. Deploy this to undo the sync.${noRevert.length?` <br><b style="color:var(--prod)">Note:</b> ${noRevert.length} item(s) are new to the target and can't be auto-reverted by a profile deploy — remove manually if needed: ${esc(noRevert.join(', '))}.`:''}</p>
       ${hasRb ? codeBlock(`${pname}.rollback.profile-meta.xml`, rbXml, 'xml') + codeBlock('rollback.sh', rbCmd, 'sh') : '<p style="color:var(--faint);font-size:12px">All selected changes are net-new to the target, so there is no prior state to restore.</p>'}
@@ -1164,8 +1186,9 @@ $('#clearAllBtn').onclick=()=>{ ENVS.forEach(e=>{$('#ta-'+e).value='';loadEnv(e)
 ['search','catFilter','statusFilter'].forEach(id=>$('#'+id).addEventListener('input',()=>DIFF&&applyFilters()));
 $('#riskOnly').addEventListener('change',()=>DIFF&&applyFilters());
 $('#genBtn').onclick=generateSync;
-$('#selAll').onclick=()=>{$$('.syncchk').forEach(c=>c.checked=true);};
-$('#selNone').onclick=()=>{$$('.syncchk').forEach(c=>c.checked=false);};
+$('#selAll').onclick=()=>{$$('#syncBody tr').forEach(r=>{ if(r.style.display!=='none'){ const c=r.querySelector('.syncchk'); if(c) c.checked=true; } });};
+$('#selNone').onclick=()=>{$$('#syncBody tr').forEach(r=>{ if(r.style.display!=='none'){ const c=r.querySelector('.syncchk'); if(c) c.checked=false; } });};
+$('#syncSearch').addEventListener('input', filterSyncRows);
 $$('.lens').forEach(l=>l.onclick=()=>{
   $$('.lens').forEach(x=>x.classList.remove('active')); l.classList.add('active');
   const v=l.dataset.lens; $$('.lens-view').forEach(s=>s.classList.toggle('hidden', s.dataset.view!==v));
