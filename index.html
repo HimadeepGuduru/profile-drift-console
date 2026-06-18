@@ -818,6 +818,8 @@ sf project deploy start -m "Profile:${pname}" -o ${alias}_ORG
 sf project deploy report -o ${alias}_ORG`;
   const rbCmd = `# ROLLBACK — restores ${pname} to its state BEFORE this sync (replace ${alias}_ORG with your org alias):\nsf project deploy start -m "Profile:${pname}" -o ${alias}_ORG`;
   $('#syncOut').innerHTML = `
+    <div class="infobox" style="margin-bottom:14px;border-color:var(--warn)"><h3 style="color:var(--warn)">⚠ This generated files — it did NOT deploy anything</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin:0">Nothing has changed in <b>${esc(slotFull(tgt))}</b> yet. The items below are reviewable artifacts. To actually apply them, run the <code>deploy.sh</code> command below with the Salesforce CLI (or push the profile through your pipeline). The org stays untouched until you do.</p></div>
     <div class="infobox" style="margin-bottom:14px"><h3>Change audit — ${chosen.length} permission(s)</h3>
       ${audit.map(a=>`<div class="auditline">${a.startsWith('✓')?'<b>'+a+'</b>':a}</div>`).join('')}</div>
     ${codeBlock(`${pname}.profile-meta.xml`, xml, 'xml')}
@@ -833,7 +835,7 @@ sf project deploy report -o ${alias}_ORG`;
       ${hasRb ? codeBlock(`${pname}.rollback.profile-meta.xml`, rbXml, 'xml') + codeBlock('rollback.sh', rbCmd, 'sh') : '<p style="color:var(--faint);font-size:12px">All selected changes are net-new to the target, so there is no prior state to restore.</p>'}
     </div>`;
   wireCodeButtons();
-  toast(`Sync package generated · ${chosen.length} change(s)`);
+  toast(`Package generated (not deployed) · run deploy.sh to apply to ${slotPrimary(tgt)}`);
 }
 function serializeProfile(orig, cats){
   let out = '<?xml version="1.0" encoding="UTF-8"?>\n<Profile xmlns="'+NS_HINT+'">\n';
