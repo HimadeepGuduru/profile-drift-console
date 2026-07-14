@@ -235,9 +235,26 @@
     .legend{display:none}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+  /* OrgKit shared nav */
+  .ok-nav{position:sticky;top:0;z-index:200;background:rgba(11,16,24,0.97);backdrop-filter:blur(8px);border-bottom:1px solid #1a2435;padding:0 20px;height:40px;display:flex;align-items:center;gap:14px}
+  .ok-home{color:#5d6c8a;font-size:12px;text-decoration:none;display:flex;align-items:center;gap:5px;font-family:var(--body)}
+  .ok-home:hover{color:#8595b3}
+  .ok-tool{color:#e8eef9;font-size:12px;font-weight:600;font-family:var(--disp)}
+  .ok-spacer{flex:1}
+  .ok-org{display:none;align-items:center;gap:6px;padding:3px 10px;border-radius:6px;border:1px solid rgba(52,211,153,0.25);background:rgba(52,211,153,0.06)}
+  .ok-org.show{display:flex}
+  .ok-dot{width:5px;height:5px;border-radius:50%;background:#34d399;flex-shrink:0}
+  .ok-orgname{font-family:var(--mono);font-size:11px;color:#34d399}
 </style>
 </head>
 <body>
+<nav class="ok-nav">
+  <a class="ok-home" href="/">← OrgKit</a>
+  <span class="ok-tool">Profile Drift Console</span>
+  <div class="ok-spacer"></div>
+  <div class="ok-org" id="okOrgEl"><div class="ok-dot"></div><span class="ok-orgname" id="okOrgName"></span></div>
+</nav>
 <div class="wrap">
 
   <div class="top">
@@ -424,7 +441,7 @@ sf org display -o MyOrg --json</pre>
     <div class="modal-foot" style="margin-top:14px">
       <button class="btn ghost" id="connCancel">Cancel</button>
     </div>
-    <p class="msub" style="margin:10px 0 0;font-size:11px">Needs this site's origin in the org's CORS allowlist (Setup → CORS). App, record-type and layout visibility aren't in the REST read — paste the XML for a complete profile.</p>
+    <p class="msub" style="margin:10px 0 0;font-size:11px">Needs CORS configured once on OrgKit home — covers all OrgKit tools.</p>
   </div>
 </div>
 
@@ -874,6 +891,17 @@ function wireCodeButtons(){
 let connEnv = null;
 // ── Set this ONCE and no teammate ever has to paste the Consumer Key. ──
 // A Consumer Key (Client ID) is a public OAuth identifier — safe to commit. (The Consumer SECRET is not; don't put that here.)
+
+  // OrgKit shared session
+  const ORGKIT_KEY = 'orgkit_v1';
+  function getOrgKitSession(){try{return JSON.parse(localStorage.getItem(ORGKIT_KEY)||'null');}catch(e){return null;}}
+  function setOrgKitSession(s){try{localStorage.setItem(ORGKIT_KEY,JSON.stringify(s));}catch(e){}}
+  function showOkTopbar(name){
+    const el=document.getElementById('okOrgEl'),nm=document.getElementById('okOrgName');
+    if(el) el.classList.add('show');
+    if(nm) nm.textContent=name;
+  }
+
 const DEFAULT_CONSUMER_KEY = '3MVG9GCMQoQ6rpzTViwky6e4Z5H5nh_DA.l0ehIFzS0Ocakc_DGmq9dOc35ob2ADS0FcSxpLDwobPftNSB_Yz'; // Connected App Consumer Key — public OAuth client_id, safe to commit. (Do NOT put the Consumer Secret here.)
 const LS_KEY='pdc_consumer_key';
 function getKey(){ try{ return DEFAULT_CONSUMER_KEY || localStorage.getItem(LS_KEY) || ''; }catch(e){ return DEFAULT_CONSUMER_KEY || ''; } }
@@ -952,10 +980,12 @@ async function finishConnect(env, inst, token, prof){
     const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
     $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : '✗ '+(e.message||e);
     $('#stat-'+env).className='stat bad';
-    toast(cors ? 'Logged in, but blocked by CORS — add '+location.origin+' to the org\u2019s CORS allowlist (Setup \u2192 CORS), then Log in again.' : 'Failed: '+(e.message||e));
+    toast(cors ? 'CORS not configured — run Apex once on OrgKit home (himadeepguduru.github.io). Covers all OrgKit tools.' : 'Failed: '+(e.message||e));
     return;
   }
   const orgName = fetchOrgName(inst);
+  setOrgKitSession({accessToken:token, instanceUrl:inst, name:orgName||'Profile Drift Org', loginBase: inst.includes('test') ? 'https://test.salesforce.com' : 'https://login.salesforce.com', connectedAt:Date.now()});
+  showOkTopbar(orgName);
   const match = prof && names.find(n=> n.toLowerCase()===prof.toLowerCase());
   if(match){ readProfile(env, inst, token, match, orgName); return; }
   openPicker(env, inst, token, names, prof, orgName);
@@ -977,7 +1007,7 @@ function openPicker(env, inst, token, names, attempted, orgName){
     : (maxPick>1
         ? `Signed in. Tick up to ${maxPick} profiles — they load into ${maxPick} columns from this one login.${protectedNote}`
         : `Signed in. Tick one profile to load into this column.${protectedNote}`)) + countNote;
-  $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn\u2019t found — pick from the list.') : '';
+  $('#pickErr').textContent = attempted ? ('"'+attempted+'" wasn’t found — pick from the list.') : '';
   $('#pickSearch').value='';
   renderPickList('');
   $('#pickerOverlay').classList.add('show');
@@ -1009,7 +1039,7 @@ async function readProfile(env, inst, token, prof, orgName){
     const cors=/Failed to fetch|NetworkError|TypeError/.test(String(e));
     $('#stat-'+env).textContent = cors ? '✗ read blocked — add CORS' : (String(e.message||e)==='no-perms' ? '✗ no perms for that profile' : '✗ '+(e.message||e));
     $('#stat-'+env).className='stat bad';
-    toast(cors ? 'Read blocked by CORS — add '+location.origin+' to Setup \u2192 CORS.' : (String(e.message||e)==='no-perms' ? 'No permissions came back for that profile.' : 'Read failed: '+(e.message||e)));
+    toast(cors ? 'Read blocked by CORS — add '+location.origin+' to Setup → CORS.' : (String(e.message||e)==='no-perms' ? 'No permissions came back for that profile.' : 'Read failed: '+(e.message||e)));
   }
 }
 const sescQ = s=>String(s).replace(/'/g,"\\'");
@@ -1229,6 +1259,19 @@ $('#sampleBtn').onclick=()=>{
   $('#nm-dev').textContent='Custom_App_User'; $('#nm-uat').textContent='Custom_App_User'; $('#nm-prod').textContent='Custom_App_User';
   toast('Demo loaded — explore each lens above');
 };
+
+  // OrgKit: auto-connect from shared session
+  (function(){
+    const _oks = getOrgKitSession();
+    if (_oks && _oks.accessToken && _oks.instanceUrl) {
+      // Pre-fill env1 connect button if available
+      const envBtn = document.querySelector('[data-env="1"] .env-btn, #connect-btn-1, .connect-btn');
+      if (envBtn) {
+        // Don't auto-trigger — just show the shared session is available
+        showOkTopbar(_oks.name || 'Connected');
+      }
+    }
+  })();
 </script>
 </body>
 </html>
